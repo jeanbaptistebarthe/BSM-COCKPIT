@@ -355,7 +355,7 @@ const STORE_KEY = "bsm_cockpit_v1";
 const PAYMENT_METHODS = ["CB","Chèque","Mvola","Orange Money","Espèces","Virement"];
 const SECTORS = ["Industrie / Distribution","Banque / Finance","Énergie","Aéroportuaire","Télécom","Public / Institutionnel","Santé","Autre"];
 const CAT_IN  = ["Honoraires mission","Diagnostic / Audit","Formation","Veille / Abonnement","Autre"];
-const CAT_OUT = ["Salaires","Loyer / Bureau","Déplacements","Fournitures","Marketing","Sous-traitance","Charges & taxes","Autre"];
+const CAT_OUT = ["Salaires","Primes & indemnités","Loyer / Bureau","Déplacements","Fournitures","Marketing","Sous-traitance","Charges & taxes","Autre"];
 const EVENT_TYPES = {audit:"Audit", prospect:"Prospection", rdv:"Rendez-vous", autre:"Autre"};
 // --- Méthode R5 ---
 const R5_PHASES = ["REVEAL","CONNECT","RESPOND","STRENGTHEN","REVIEW"];
@@ -369,6 +369,8 @@ const RECO_PRIORITIES = ["Critique","Élevée","Modérée","Faible"];
 const RH_POLES = ["Direction","Audit / Conseil","Analyse des risques","Commercial","Administratif","Terrain","Support IT"];
 const RH_PERMISSIONS = ["Administrateur","Consultant","Analyste","Assistant","Lecture seule"];
 const CONTRACT_TYPES = ["CDI","CDD","Stage","Prestation","Poste à pourvoir"];
+// Classification professionnelle malgache (Code du travail — Loi n°2003-044). Ajustable.
+const MG_CATEGORIES = ["M1 — Manœuvre","M2 — Manœuvre spécialisé","OS1 — Ouvrier spécialisé","OS2","OS3","OP1 — Ouvrier professionnel","OP1A","OP2","OP3","E1 — Employé","E2","E3","AM1 — Agent de maîtrise","AM2","AM3","C1 — Cadre","C2","C3","HC — Hors Catégorie (cadre dirigeant)"];
 const CONTRACT_KINDS = ["Audit ponctuel","Accompagnement annuel","Forfait mission","Diagnostic R5","Veille / Abonnement","Autre"];
 const LEAVE_TYPES = ["Congé payé","Maladie","Sans solde","Récupération","Mission terrain","Formation"];
 const AUDIT_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSd7P7NzygqF1RizjTcYJvaFCbRUV71-XAdPe7Ly0Kth08vi4A/viewform";
@@ -384,8 +386,9 @@ function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(
 
 function defaultDB(){
   return {
-    meta:{ version:2, defaultCurrency:"MGA", rateEurMga:5000, created:todayISO(), r5SheetId:"", taxRate:20, amort:0, financier:0 },
-    recurring:[],
+    meta:{ version:2, defaultCurrency:"MGA", rateEurMga:5000, created:todayISO(), r5SheetId:"", taxRate:20, amort:0, financier:0,
+      legalMg:{ dureeHebdo:40, dureeMensuelle:173.33, congesParMois:2.5, cnapsSal:1, cnapsPat:13, ostieSal:1, ostiePat:5 } },
+    recurring:[], jobs:[], primes:[], devis:[],
     clients:[], events:[], transactions:[],
     missions:[], risks:[], recommendations:[],
     employees:[], recruitments:[], leaves:[], activities:[], documents:[], playbooks:[], aiMemory:[], aiChat:[],
@@ -457,7 +460,8 @@ function load(){
   DB.missions=DB.missions||[]; DB.risks=DB.risks||[]; DB.recommendations=DB.recommendations||[];
   DB.employees=DB.employees||[]; DB.recruitments=DB.recruitments||[]; DB.leaves=DB.leaves||[]; DB.activities=DB.activities||[]; DB.documents=DB.documents||[];
   DB.playbooks=DB.playbooks||[]; DB.aiMemory=DB.aiMemory||[]; DB.aiChat=DB.aiChat||[];
-  DB.recurring=DB.recurring||[];
+  DB.recurring=DB.recurring||[]; DB.jobs=DB.jobs||[]; DB.primes=DB.primes||[]; DB.devis=DB.devis||[];
+  if(!DB.meta.legalMg) DB.meta.legalMg={ dureeHebdo:40, dureeMensuelle:173.33, congesParMois:2.5, cnapsSal:1, cnapsPat:13, ostieSal:1, ostiePat:5 };
   if(DB.meta.taxRate==null) DB.meta.taxRate=20;
   if(DB.meta.amort==null) DB.meta.amort=0;
   if(DB.meta.financier==null) DB.meta.financier=0;
@@ -486,13 +490,33 @@ function generateRecurring(){
       const isPast = dstr<=todayISO();
       DB.transactions.push({ id:uid(), sens:rc.sens||"sortant", label:rc.label, amount:rc.amount,
         currency:rc.currency||DB.meta.defaultCurrency, method: isPast?(rc.method||""):"", category:rc.category,
-        clientId:rc.clientId||"", recurringId:rc.id, period, date:dstr, dueDate:dstr,
+        clientId:rc.clientId||"", employeeId:rc.employeeId||"", recurringId:rc.id, period, date:dstr, dueDate:dstr,
         status: isPast?"realise":"prevu" });
       created++;
     }
   });
   if(created){ save(); }
   return created;
+}
+/* ---- Paie & cadre légal malgache ---- */
+function mgLegal(){ if(!DB.meta.legalMg) DB.meta.legalMg={dureeHebdo:40,dureeMensuelle:173.33,congesParMois:2.5,cnapsSal:1,cnapsPat:13,ostieSal:1,ostiePat:5}; return DB.meta.legalMg; }
+function salaryBreakdown(brut){
+  const L=mgLegal(); brut=brut||0;
+  const chargesPat=Math.round(brut*(L.cnapsPat+L.ostiePat)/100);
+  const retenues=Math.round(brut*(L.cnapsSal+L.ostieSal)/100);
+  return { brut, chargesPat, cout:brut+chargesPat, retenues, netAvantIRSA:brut-retenues };
+}
+function employerCost(brut){ return salaryBreakdown(brut).cout; }
+// Crée/synchronise la charge salariale récurrente (coût employeur) d'un collaborateur actif.
+function syncEmployeeSalary(emp){
+  const existing=DB.recurring.find(r=>r.employeeId===emp.id);
+  if(emp.status==="actif" && emp.salaryBrut>0){
+    const start=(existing&&existing.startDate)||(todayISO().slice(0,7)+"-01"); // pas de rétroactif : démarre au mois courant
+    const obj={ sens:"sortant", label:"Salaire chargé — "+emp.name, amount:employerCost(emp.salaryBrut),
+      currency:emp.salaryCurrency||DB.meta.defaultCurrency, category:"Salaires", day:28, startDate:start, active:true, employeeId:emp.id };
+    if(existing){ Object.assign(existing,obj); } else { obj.id=uid(); obj.created=todayISO(); DB.recurring.push(obj); }
+  } else if(existing){ existing.active=false; }
+  generateRecurring();
 }
 function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }
 
@@ -839,6 +863,7 @@ function renderClientFiche(){
       </div>
       ${docsList(c.id)}
     </div>
+    ${devisCardHtml(c)}
     <div class="grid2 wide">
       <div class="card"><h2>Missions (${miss.length})</h2>${miss.length?`<table><tbody>`+miss.map(m=>`<tr><td><b>${esc(m.ref||'—')}</b> ${esc(m.type||'')}</td><td style="font-size:11.5px;color:var(--muted)">${R5_LABELS[m.phase]||esc(m.phase||'')}</td><td style="text-align:right"><span class="badge ${m.status==='termine'?'b-green':m.status==='suspendue'?'b-grey':'b-blue'}">${m.status==='termine'?'Terminée':m.status==='suspendue'?'Suspendue':'En cours'}</span></td></tr>`).join('')+`</tbody></table>`:`<div class="empty">Aucune mission.</div>`}</div>
       <div class="card"><h2>Prochains rendez-vous</h2>${evs.length?`<div class="mini-list">`+evs.slice(0,5).map(e=>`<div class="li"><span><span class="badge ${evBadge(e.type)}">${EVENT_TYPES[e.type]}</span> ${esc(e.title)}</span><span class="d">${frDate(e.date)}</span></div>`).join('')+`</div>`:`<div class="empty">Aucun rendez-vous à venir.</div>`}</div>
@@ -918,7 +943,7 @@ function renderCommercial(){
     <div class="card" style="padding:0;overflow:hidden">
       <iframe src="simulateur.html" title="Simulateur commercial BSM" style="width:100%;height:80vh;border:none;display:block;background:#fff"></iframe>
     </div>
-    <div class="hint" style="margin-top:-8px">Le simulateur est autonome : ses tarifs et sa clé IA se règlent dans son propre panneau. Un devis généré peut être importé dans la fiche d'un client (bouton « + Devis »).</div>`;
+    <div class="hint" style="margin-top:-8px">Quand vous <b>générez un devis ou une proposition</b> ici, il est <b>automatiquement envoyé au Cockpit</b> : il se rattache au bon client (ou vous choisissez lequel) et vous êtes redirigé vers sa fiche. Un seul devis validé par client. Depuis la fiche, un clic crée la mission et son échéancier.</div>`;
 }
 
 /* ----------------------------- Documents client (devis, NDA, contrats…) ----------------------------- */
@@ -944,6 +969,102 @@ function uploadClientDoc(clientId, category){
 function deleteDoc(id){
   const d=DB.documents.find(x=>x.id===id);
   confirmModal("Supprimer ce document ?", d?esc(d.name):"", ()=>{ DB.documents=DB.documents.filter(x=>x.id!==id); save(); renderClientFiche(); toast("Document supprimé."); });
+}
+
+/* ----------------------------- Devis (1 par client, reçu du simulateur ou manuel) ----------------------------- */
+function clientDevis(id){ return DB.devis.find(d=>d.clientId===id); }
+function devisCur(c){ return (c==="EUR"||c==="MGA")?c:DB.meta.defaultCurrency; }
+// Réception d'un devis émis par le simulateur (postMessage)
+function onSimulatorMessage(e){ const p=e&&e.data; if(!p||p.__bsm!=="devis") return; receiveDevis(p); }
+function receiveDevis(p){
+  const pending={ client:(p.client||"").trim(), contact:p.contact||"", ref:p.ref||nextRef("DV",DB.devis),
+    objet:p.objet||"", total:Math.round(p.total||0), currency:devisCur(p.currency), validite:p.validite||30, kind:p.kind||"Devis" };
+  const q=pending.client.toLowerCase();
+  const match = q && (DB.clients.find(c=>(c.company||"").toLowerCase()===q)
+    || DB.clients.find(c=>{const n=(c.company||"").toLowerCase(); return n&&(n.includes(q)||q.includes(n));}));
+  if(match){ saveDevisFor(match.id, pending); toast("Devis « "+pending.ref+" » reçu → "+match.company); openClientFiche(match.id); }
+  else { openDevisClientPicker(pending); }
+}
+function saveDevisFor(clientId, d){
+  const existing=DB.devis.find(x=>x.clientId===clientId);
+  const obj={ clientId, ref:d.ref, objet:d.objet, total:d.total, currency:devisCur(d.currency), validite:d.validite, kind:d.kind, date:todayISO(), status:"valide", source:d.source||"simulateur" };
+  if(existing){ obj.id=existing.id; Object.assign(existing,obj); } else { obj.id=uid(); DB.devis.push(obj); }
+  save();
+}
+function openDevisClientPicker(pending){
+  window.__pendingDevis=pending;
+  openModal(`
+    <span class="close" onclick="closeModal()">✕</span>
+    <h2>Devis reçu du simulateur</h2>
+    <div class="msub">${esc(pending.kind)} — ${esc(pending.client||"client inconnu")} · ${fmt(pending.total,pending.currency)} · réf ${esc(pending.ref)}</div>
+    <div class="field"><label>Rattacher à un client</label>
+      <select id="f-dvclient"><option value="__new">➕ Créer le client « ${esc(pending.client||"Nouveau client")} »</option>${DB.clients.map(c=>`<option value="${c.id}">${esc(c.company)}</option>`).join("")}</select></div>
+    <div class="hint">Un seul devis validé par client : ceci remplacera l'éventuel devis existant du client choisi.</div>
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="confirmDevisClient()">Valider le devis</button></div>`);
+}
+function confirmDevisClient(){
+  const pending=window.__pendingDevis; if(!pending) return;
+  let cid=val("f-dvclient");
+  if(cid==="__new"){ const c={id:uid(),company:pending.client||"Nouveau client",contactName:pending.contact||"",sector:"Autre",status:"prospect",createdAt:todayISO()}; DB.clients.push(c); cid=c.id; }
+  saveDevisFor(cid, pending); window.__pendingDevis=null; closeModal(); toast("Devis enregistré."); openClientFiche(cid);
+}
+function devisCardHtml(c){
+  const d=clientDevis(c.id);
+  return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap"><h2 style="margin:0">Devis validé</h2>
+      <div style="display:flex;gap:6px">${d?`<button class="cta ghost sm" onclick="printDevis('${c.id}')">🖨 PDF</button>`:""}<button class="cta ghost sm" onclick="openDevisForm('${c.id}')">${d?"✎ Modifier":"+ Devis"}</button></div></div>
+    ${d?`<div class="mini-list" style="margin-top:8px">
+        <div class="li"><span>Référence</span><b>${esc(d.ref)}</b></div>
+        <div class="li"><span>Objet</span><span style="text-align:right;max-width:60%">${esc(d.objet||"—")}</span></div>
+        <div class="li"><span>Montant HT</span><b>${fmt(d.total,d.currency)}</b></div>
+        <div class="li"><span>Type · validité</span><span>${esc(d.kind||"Devis")} · ${d.validite||30} j</span></div>
+        <div class="li"><span>Statut</span><span class="badge b-green">Validé${d.source==="simulateur"?" · simulateur":""}</span></div></div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="cta sm" onclick="missionFromDevis('${c.id}')">🎯 Créer la mission depuis ce devis</button>
+        <button class="cta ghost sm" style="color:var(--red)" onclick="deleteDevis('${c.id}')">🗑 Supprimer</button></div>`
+      :`<div class="empty" style="margin-top:8px">Aucun devis validé. Générez-en un depuis le <b>simulateur</b> (onglet Simulateur) — il arrive ici automatiquement — ou créez-le à la main.</div>`}
+  </div>`;
+}
+function openDevisForm(clientId){
+  const d=clientDevis(clientId)||{currency:DB.meta.defaultCurrency,validite:30,kind:"Devis",ref:nextRef("DV",DB.devis)};
+  openModal(`
+    <span class="close" onclick="closeModal()">✕</span>
+    <h2>${clientDevis(clientId)?"Modifier le devis":"Nouveau devis"}</h2>
+    <div class="msub">Un seul devis validé par client.</div>
+    <div class="field row2"><label>Référence & type</label>
+      <input id="f-dref" value="${esc(d.ref||'')}"><input id="f-dkind" value="${esc(d.kind||'Devis')}"></div>
+    <div class="field"><label>Objet de la mission</label><input id="f-dobjet" value="${esc(d.objet||'')}"></div>
+    <div class="field row2"><label>Montant HT & devise</label>
+      <input type="number" id="f-dtotal" value="${d.total!=null?d.total:''}">
+      <select id="f-dcur">${["MGA","EUR"].map(x=>`<option value="${x}" ${devisCur(d.currency)===x?'selected':''}>${x==='MGA'?'Ariary':'Euro'}</option>`).join("")}</select></div>
+    <div class="field"><label>Validité (jours)</label><input type="number" id="f-dval" value="${d.validite||30}"></div>
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="saveDevisManual('${clientId}')">Enregistrer</button></div>`);
+}
+function saveDevisManual(clientId){
+  const total=parseFloat(val("f-dtotal")); if(isNaN(total)||total<0){ toast("Montant invalide."); return; }
+  saveDevisFor(clientId, { ref:val("f-dref").trim()||nextRef("DV",DB.devis), objet:val("f-dobjet"), total:Math.round(total),
+    currency:val("f-dcur"), validite:parseInt(val("f-dval"))||30, kind:val("f-dkind")||"Devis", source:"manuel" });
+  closeModal(); renderClientFiche(); toast("Devis enregistré.");
+}
+function missionFromDevis(clientId){
+  const d=clientDevis(clientId); if(!d) return;
+  setScreen("missions"); openMissionForm(null, clientId, d.total, devisCur(d.currency));
+}
+function deleteDevis(clientId){
+  const d=clientDevis(clientId); if(!d) return;
+  confirmModal("Supprimer ce devis ?", esc(d.ref)+" — "+fmt(d.total,d.currency), ()=>{ DB.devis=DB.devis.filter(x=>x.clientId!==clientId); save(); renderClientFiche(); toast("Devis supprimé."); });
+}
+function printDevis(clientId){
+  const d=clientDevis(clientId), c=DB.clients.find(x=>x.id===clientId); if(!d||!c) return;
+  const vd=new Date(); vd.setDate(vd.getDate()+(d.validite||30));
+  document.getElementById("report").innerHTML=`<div class="rep">
+    ${repHeader("Devis — "+esc(c.company), esc(d.ref))}
+    <p class="meta">Client : ${esc(c.company)}${c.contactName?" · "+esc(c.contactName):""} · Date : ${frDate(d.date||todayISO())} · Validité : ${d.validite||30} jours (jusqu'au ${frDate(vd.toISOString().slice(0,10))})</p>
+    <table><tr><th>Objet</th><td>${esc(d.objet||"Mission de conseil en gestion des risques R5®")}</td></tr>
+      <tr><th>Type</th><td>${esc(d.kind||"Devis")}</td></tr>
+      <tr><th>Montant HT</th><td style="font-weight:700">${fmt(d.total,d.currency)}</td></tr></table>
+    <p class="meta">Devis validé — établi par ${esc(DB.meta.cabinetName||"BSM Advisory & Consulting")}.</p>
+  </div>`;
+  window.print();
 }
 
 /* ----------------------------- Agenda ----------------------------- */
@@ -1218,8 +1339,8 @@ function pnlColumn(pred){
     if(t.sens==="entrant"){ inn[t.category||"Autre"]=(inn[t.category||"Autre"]||0)+v; }
     else { out[t.category||"Autre"]=(out[t.category||"Autre"]||0)+v; } });
   const produits=Object.values(inn).reduce((s,x)=>s+x,0);
-  const personnel=out["Salaires"]||0, taxes=out["Charges & taxes"]||0;
-  let chargesExt=0; Object.entries(out).forEach(([k,v])=>{ if(k!=="Salaires"&&k!=="Charges & taxes") chargesExt+=v; });
+  const personnel=(out["Salaires"]||0)+(out["Primes & indemnités"]||0), taxes=out["Charges & taxes"]||0;
+  let chargesExt=0; Object.entries(out).forEach(([k,v])=>{ if(k!=="Salaires"&&k!=="Primes & indemnités"&&k!=="Charges & taxes") chargesExt+=v; });
   const amort=DB.meta.amort||0, financier=DB.meta.financier||0, taxRate=DB.meta.taxRate!=null?DB.meta.taxRate:20;
   const ebe=produits-chargesExt-personnel-taxes;
   const rexp=ebe-amort, rai=rexp+financier;
@@ -1414,6 +1535,16 @@ function generateAdvice(){
   const outM=DB.transactions.filter(x=>x.sens==="sortant"&&x.status==="realise"&&x.date.slice(0,7)===mk).reduce((s,x)=>s+toDefault(x.amount,x.currency),0);
   if(outM>inM && outM>0) add("treso-"+mk,"warn","📉","Trésorerie du mois négative",
     `Ce mois-ci : ${fmtD(outM)} de dépenses pour ${fmtD(inM)} d'entrées (solde ${fmtD(inM-outM)}). Prioriser les encaissements en attente avant d'engager de nouvelles dépenses.`);
+  // 2b. RH — recrutements ouverts depuis longtemps
+  DB.recruitments.filter(r=>r.status!=="clos" && r.openedDate && r.openedDate<isoOffset(-30)).forEach(r=>{
+    add("recrut-"+r.id,"warn","🧑‍💼","Recrutement à faire avancer",
+      `Poste « ${r.poste} » ouvert depuis le ${frDate(r.openedDate)} (statut : ${cap(r.status||"ouvert")}). Planifier les entretiens ou clore le poste.`);
+  });
+  // 2c. RH — collaborateurs actifs sans salaire renseigné (non intégrés au budget)
+  DB.employees.filter(e=>e.status==="actif" && !(e.salaryBrut>0)).forEach(e=>{
+    add("nosal-"+e.id,"info","💶","Salaire non renseigné",
+      `${e.name} est actif mais sans salaire saisi : sa charge n'apparaît pas dans le budget ni le compte de résultat. Renseigner son salaire brut dans RH.`);
+  });
   // 3. Prospects sans relance récente
   DB.clients.filter(c=>c.status==="prospect").forEach(c=>{
     const evs=DB.events.filter(e=>e.clientId===c.id);
@@ -1698,8 +1829,8 @@ function renderMissions(){
       : `<div class="empty">Aucune mission. Cliquez « + Nouvelle mission » ou importez depuis le Sheet R5.</div>`}
     </div>`;
 }
-function openMissionForm(id, prefillClientId){
-  const m=id?DB.missions.find(x=>x.id===id):{phase:"REVEAL",status:"en_cours",currency:DB.meta.defaultCurrency,nda:false,contrat:false,rapport:false,startDate:todayISO(),clientId:prefillClientId||""};
+function openMissionForm(id, prefillClientId, prefillAmount, prefillCur){
+  const m=id?DB.missions.find(x=>x.id===id):{phase:"REVEAL",status:"en_cours",currency:prefillCur||DB.meta.defaultCurrency,nda:false,contrat:false,rapport:false,startDate:todayISO(),clientId:prefillClientId||"",montantHT:(prefillAmount!=null&&prefillAmount!=="")?prefillAmount:undefined};
   openModal(`
     <span class="close" onclick="closeModal()">✕</span>
     <h2>${id?"Modifier la mission":"Nouvelle mission"}</h2>
@@ -1989,9 +2120,9 @@ function deleteReco(id){
 let rhTab="personnel";
 function empName(id){const e=DB.employees.find(x=>x.id===id);return e?e.name:"—";}
 function renderRH(){
-  const tabs=[["personnel","Personnel"],["recrutement","Recrutement"],["conges","Congés & absences"],["activites","Activités"]];
-  const body={personnel:rhPersonnel,recrutement:rhRecrutement,conges:rhConges,activites:rhActivites}[rhTab]();
-  const addmap={personnel:["openEmployeeForm()","+ Collaborateur"],recrutement:["openRecruitForm()","+ Poste à pourvoir"],conges:["openLeaveForm()","+ Congé / absence"],activites:["openActivityForm()","+ Activité"]};
+  const tabs=[["personnel","Personnel"],["fiches","Fiches de poste"],["primes","Primes"],["recrutement","Recrutement"],["conges","Congés & absences"],["activites","Activités"]];
+  const body={personnel:rhPersonnel,fiches:rhFiches,primes:rhPrimes,recrutement:rhRecrutement,conges:rhConges,activites:rhActivites}[rhTab]();
+  const addmap={personnel:["openEmployeeForm()","+ Collaborateur"],fiches:["openJobForm()","+ Fiche de poste"],primes:["openPrimeAttrib()","+ Attribuer une prime"],recrutement:["openRecruitForm()","+ Poste à pourvoir"],conges:["openLeaveForm()","+ Congé / absence"],activites:["openActivityForm()","+ Activité"]};
   document.getElementById("scr-rh").innerHTML=`
     <div class="pagetitle"><div><h1>RH & équipe</h1><div class="sub">Personnel, recrutement, congés, activités — tout modifiable</div></div>
       <button class="cta" onclick="${addmap[rhTab][0]}">${addmap[rhTab][1]}</button></div>
@@ -2000,11 +2131,18 @@ function renderRH(){
 }
 function rhPersonnel(){
   const list=DB.employees.slice();
-  return `<div class="card">${list.length?`<table><thead><tr><th>Nom</th><th>Poste</th><th>Pôle / secteurs</th><th>Permission</th><th>Contrat</th><th>Statut</th><th></th></tr></thead><tbody>`+
+  const masse=DB.employees.filter(e=>e.status==="actif"&&e.salaryBrut>0).reduce((s,e)=>s+toDefault(employerCost(e.salaryBrut), e.salaryCurrency||DB.meta.defaultCurrency),0);
+  return `<div class="kpis" style="margin-bottom:12px">
+      <div class="kpi"><div class="v">${DB.employees.filter(e=>e.status==="actif").length}</div><div class="l">Collaborateurs actifs</div></div>
+      <div class="kpi"><div class="v warn">${fmtD(masse)}</div><div class="l">Masse salariale chargée / mois</div></div>
+      <div class="kpi"><div class="v">${fmtD(masse*12)}</div><div class="l">Coût annuel estimé</div></div>
+    </div>
+    <div class="card">${list.length?`<table><thead><tr><th>Nom</th><th>Poste</th><th>Catégorie</th><th>Statut</th><th style="text-align:right">Salaire chargé/mois</th><th></th></tr></thead><tbody>`+
     list.map(e=>`<tr><td><b>${esc(e.name)}</b>${e.email?`<br><span style="color:var(--muted);font-size:11.5px">${esc(e.email)}</span>`:""}</td>
-      <td>${esc(e.poste||"—")}</td><td>${esc(e.pole||"—")}${e.secteurs?`<br><span style="color:var(--muted);font-size:11.5px">${esc(e.secteurs)}</span>`:""}</td>
-      <td><span class="badge b-blue">${esc(e.permission||"—")}</span></td><td>${esc(e.contract||"—")}</td>
+      <td>${esc(e.poste||"—")}<br><span style="color:var(--muted);font-size:11.5px">${esc(e.pole||"")}</span></td>
+      <td style="font-size:11.5px">${esc((e.category||"—").split(" — ")[0])}</td>
       <td><span class="badge ${e.status==='actif'?'b-actif':e.status==='recrutement'?'b-prospect':'b-archive'}">${e.status==='actif'?'Actif':e.status==='recrutement'?'Recrutement':'Inactif'}</span></td>
+      <td style="text-align:right">${e.salaryBrut>0?fmt(employerCost(e.salaryBrut),e.salaryCurrency||DB.meta.defaultCurrency):"—"}${e.salaryBrut>0?`<br><span style="color:var(--muted);font-size:10.5px">brut ${fmt(e.salaryBrut,e.salaryCurrency||DB.meta.defaultCurrency)}</span>`:""}</td>
       <td><div class="rowact"><button class="iconbtn" onclick="openEmployeeForm('${e.id}')">✎</button><button class="iconbtn del" onclick="deleteEmployee('${e.id}')">🗑</button></div></td></tr>`).join("")+`</tbody></table>`
     :`<div class="empty">Aucun collaborateur.</div>`}</div>`;
 }
@@ -2019,6 +2157,11 @@ function openEmployeeForm(id){
     <div class="field row2"><label>Permission & contrat</label>
       <select id="f-eperm">${RH_PERMISSIONS.map(x=>`<option ${e.permission===x?'selected':''}>${x}</option>`).join("")}</select>
       <select id="f-econtract">${CONTRACT_TYPES.map(x=>`<option ${e.contract===x?'selected':''}>${x}</option>`).join("")}</select></div>
+    <div class="field row2"><label>Catégorie (classification malgache) & salaire brut mensuel</label>
+      <select id="f-ecat">${MG_CATEGORIES.map(x=>`<option ${e.category===x?'selected':''}>${x}</option>`).join("")}</select>
+      <input type="number" id="f-esalary" value="${e.salaryBrut!=null?e.salaryBrut:''}" placeholder="Brut / mois" oninput="empSalaryPreview()"></div>
+    <div class="field"><label>Devise du salaire</label><select id="f-esalcur" onchange="empSalaryPreview()">${["MGA","EUR"].map(c=>`<option value="${c}" ${(e.salaryCurrency||DB.meta.defaultCurrency)===c?'selected':''}>${c==='MGA'?'Ariary (Ar)':'Euro (€)'}</option>`).join("")}</select></div>
+    <div class="hint" id="emp-salary-preview"></div>
     <div class="field"><label>Secteurs / domaines d'intervention</label><input id="f-esect" value="${esc(e.secteurs||'')}"></div>
     <div class="field"><label>Missions affectées</label><input id="f-emiss" value="${esc(e.missionsAff||'')}"></div>
     <div class="field row2"><label>Téléphone & email</label>
@@ -2028,18 +2171,232 @@ function openEmployeeForm(id){
       <select id="f-estatus">${[["actif","Actif"],["recrutement","En recrutement"],["inactif","Inactif"]].map(s=>`<option value="${s[0]}" ${e.status===s[0]?'selected':''}>${s[1]}</option>`).join("")}</select></div>
     <div class="field"><label>Notes</label><textarea id="f-enotes" rows="2">${esc(e.notes||'')}</textarea></div>
     <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="saveEmployee('${id||''}')">Enregistrer</button></div>`);
+  empSalaryPreview();
+}
+function empSalaryPreview(){
+  const el=document.getElementById("emp-salary-preview"); if(!el) return;
+  const brut=parseFloat(val("f-esalary"))||0, cur=val("f-esalcur")||DB.meta.defaultCurrency, st=val("f-estatus");
+  if(!brut){ el.innerHTML="Renseignez un salaire brut pour l'intégrer automatiquement au budget (charge « Salaires »)."; return; }
+  const b=salaryBreakdown(brut); const L=mgLegal();
+  el.innerHTML=`Brut ${fmt(b.brut,cur)} · charges patronales (CNaPS ${L.cnapsPat}% + santé ${L.ostiePat}%) ${fmt(b.chargesPat,cur)} · <b>coût employeur ${fmt(b.cout,cur)}/mois</b>. Net avant IRSA ≈ ${fmt(b.netAvantIRSA,cur)}.${st==="actif"?" → généré chaque mois dans le Budget dès l'enregistrement.":" (statut non actif : pas de charge budget)."}`;
 }
 function saveEmployee(id){
   const name=val("f-ename").trim();if(!name){toast("Le nom est obligatoire.");return;}
   const obj={name,poste:val("f-eposte"),pole:val("f-epole"),permission:val("f-eperm"),contract:val("f-econtract"),
+    category:val("f-ecat"),salaryBrut:parseFloat(val("f-esalary"))||0,salaryCurrency:val("f-esalcur"),
     secteurs:val("f-esect"),missionsAff:val("f-emiss"),phone:val("f-ephone"),email:val("f-eemail"),hireDate:val("f-ehire"),status:val("f-estatus"),notes:val("f-enotes")};
-  if(id){Object.assign(DB.employees.find(x=>x.id===id),obj);}else{obj.id=uid();DB.employees.push(obj);}
-  save();closeModal();renderRH();toast("Collaborateur enregistré.");
+  let emp;
+  if(id){emp=DB.employees.find(x=>x.id===id);Object.assign(emp,obj);}else{obj.id=uid();DB.employees.push(obj);emp=obj;}
+  syncEmployeeSalary(emp);
+  save();closeModal();refreshAll();toast("Collaborateur enregistré — budget mis à jour.");
 }
 function deleteEmployee(id){
   const e=DB.employees.find(x=>x.id===id);
-  confirmModal("Supprimer ce collaborateur ?", esc(e.name), ()=>{DB.employees=DB.employees.filter(x=>x.id!==id);save();renderRH();toast("Supprimé.");});
+  const hasSal=DB.recurring.some(r=>r.employeeId===id);
+  confirmModal("Supprimer ce collaborateur ?", esc(e.name)+(hasSal?"<br>Sa charge salariale récurrente sera retirée (les salaires déjà payés restent dans l'historique).":""),
+    ()=>{DB.employees=DB.employees.filter(x=>x.id!==id);
+      DB.recurring=DB.recurring.filter(r=>r.employeeId!==id);
+      DB.transactions=DB.transactions.filter(t=>!(t.employeeId===id&&t.status==="prevu"));
+      save();refreshAll();toast("Supprimé.");});
 }
+/* ---- Fiches de poste ---- */
+function rhFiches(){
+  const list=DB.jobs.slice().sort((a,b)=>(a.intitule||"").localeCompare(b.intitule||""));
+  const L=mgLegal();
+  return `<div class="card" style="margin-bottom:12px;background:#f7f9fc">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div><b>Cadre légal — Madagascar (Code du travail, Loi n°2003-044)</b>
+          <div style="font-size:11.5px;color:var(--muted);margin-top:3px">Durée légale ${L.dureeHebdo} h/sem (${L.dureeMensuelle} h/mois) · Congés payés ${L.congesParMois} j/mois (≈30 j/an) · CNaPS ${L.cnapsSal}% salarié / ${L.cnapsPat}% employeur · Santé (OSTIE) ${L.ostieSal}% / ${L.ostiePat}%</div></div>
+        <button class="cta ghost sm" onclick="openLegalSettings()">⚙ Ajuster</button>
+      </div>
+      <div class="hint" style="margin-top:8px">⚠️ Valeurs par défaut indicatives — à vérifier selon le dernier décret en vigueur (SME/SMIG, taux de cotisation). Modifiables ici.</div>
+    </div>
+    <div class="card">${list.length?`<table><thead><tr><th>Intitulé</th><th>Catégorie</th><th>Pôle</th><th>Contrat</th><th style="text-align:right">Salaire brut</th><th></th></tr></thead><tbody>`+
+    list.map(j=>`<tr><td><b>${esc(j.intitule)}</b></td><td style="font-size:11.5px">${esc((j.category||"—").split(" — ")[0])}</td><td>${esc(j.pole||"—")}</td><td>${esc(j.contractType||"—")}</td>
+      <td style="text-align:right">${j.salaryBrut>0?fmt(j.salaryBrut,j.currency||DB.meta.defaultCurrency):"—"}</td>
+      <td><div class="rowact"><button class="iconbtn" title="Exporter en PDF" onclick="printJobFiche('${j.id}')">🖨</button><button class="iconbtn" onclick="openJobForm('${j.id}')">✎</button><button class="iconbtn del" onclick="deleteJob('${j.id}')">🗑</button></div></td></tr>`).join("")+`</tbody></table>`
+    :`<div class="empty">Aucune fiche de poste. Créez-en une — complète et exportable en PDF pour le recrutement.</div>`}</div>`;
+}
+function openJobForm(id){
+  const j=id?DB.jobs.find(x=>x.id===id):{contractType:"CDI",pole:RH_POLES[1],currency:DB.meta.defaultCurrency,category:"HC — Hors Catégorie (cadre dirigeant)",essai:"3 mois (renouvelable une fois)",preavis:"1 mois"};
+  openModal(`
+    <span class="close" onclick="closeModal()">✕</span>
+    <h2>${id?"Modifier la fiche de poste":"Nouvelle fiche de poste"}</h2>
+    <div class="field"><label>Intitulé du poste *</label><input id="f-jtitle" value="${esc(j.intitule||'')}"></div>
+    <div class="field row2"><label>Catégorie & pôle / service</label>
+      <select id="f-jcat">${MG_CATEGORIES.map(x=>`<option ${j.category===x?'selected':''}>${x}</option>`).join("")}</select>
+      <select id="f-jpole">${RH_POLES.map(x=>`<option ${j.pole===x?'selected':''}>${x}</option>`).join("")}</select></div>
+    <div class="field row2"><label>Type de contrat & rattachement hiérarchique</label>
+      <select id="f-jcontract">${CONTRACT_TYPES.map(x=>`<option ${j.contractType===x?'selected':''}>${x}</option>`).join("")}</select>
+      <input id="f-jratt" placeholder="Ex : Directeur général (N+1)" value="${esc(j.rattachement||'')}"></div>
+    <div class="field row2"><label>Salaire brut mensuel & devise</label>
+      <input type="number" id="f-jsalary" value="${j.salaryBrut!=null?j.salaryBrut:''}" placeholder="Brut / mois">
+      <select id="f-jcur">${["MGA","EUR"].map(c=>`<option value="${c}" ${(j.currency||DB.meta.defaultCurrency)===c?'selected':''}>${c==='MGA'?'Ariary':'Euro'}</option>`).join("")}</select></div>
+    <div class="field"><label>Lieu de travail</label><input id="f-jlieu" value="${esc(j.lieu||'Antananarivo')}"></div>
+    <div class="field"><label>Raison d'être / objet du poste</label><textarea id="f-jraison" rows="2">${esc(j.raisonEtre||'')}</textarea></div>
+    <div class="field"><label>Missions & responsabilités (une par ligne)</label><textarea id="f-jresp" rows="4">${esc(j.responsabilites||'')}</textarea></div>
+    <div class="field"><label>Compétences & qualités requises (une par ligne)</label><textarea id="f-jcomp" rows="3">${esc(j.competences||'')}</textarea></div>
+    <div class="field"><label>Profil recherché (formation & expérience)</label><textarea id="f-jprofil" rows="2">${esc(j.profil||'')}</textarea></div>
+    <div class="field row2"><label>Période d'essai & préavis</label>
+      <input id="f-jessai" value="${esc(j.essai||'')}" placeholder="Ex : 3 mois renouvelable une fois">
+      <input id="f-jpreavis" value="${esc(j.preavis||'')}" placeholder="Ex : 1 mois"></div>
+    <div class="field"><label>Notes internes</label><textarea id="f-jnotes" rows="2">${esc(j.notes||'')}</textarea></div>
+    <div class="hint">La durée légale du travail, les congés et les cotisations (CNaPS/OSTIE) sont ajoutés automatiquement au PDF depuis le cadre légal.</div>
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button>${id?`<button class="cta ghost" onclick="printJobFiche('${id}')">🖨 PDF</button>`:''}<button class="cta" onclick="saveJob('${id||''}')">Enregistrer</button></div>`);
+}
+function saveJob(id){
+  const intitule=val("f-jtitle").trim(); if(!intitule){ toast("L'intitulé est obligatoire."); return; }
+  const obj={ intitule, category:val("f-jcat"), pole:val("f-jpole"), contractType:val("f-jcontract"), rattachement:val("f-jratt"),
+    salaryBrut:parseFloat(val("f-jsalary"))||0, currency:val("f-jcur"), lieu:val("f-jlieu"), raisonEtre:val("f-jraison"),
+    responsabilites:val("f-jresp"), competences:val("f-jcomp"), profil:val("f-jprofil"), essai:val("f-jessai"), preavis:val("f-jpreavis"), notes:val("f-jnotes") };
+  if(id){ Object.assign(DB.jobs.find(x=>x.id===id),obj); } else { obj.id=uid(); obj.created=todayISO(); DB.jobs.push(obj); }
+  save(); closeModal(); renderRH(); toast("Fiche de poste enregistrée.");
+}
+function deleteJob(id){ const j=DB.jobs.find(x=>x.id===id); confirmModal("Supprimer cette fiche de poste ?", esc(j.intitule), ()=>{ DB.jobs=DB.jobs.filter(x=>x.id!==id); save(); renderRH(); toast("Fiche supprimée."); }); }
+function printJobFiche(id){
+  const j=DB.jobs.find(x=>x.id===id); if(!j) return; const L=mgLegal();
+  const bullets=(txt)=> (txt||"").split("\n").map(s=>s.trim()).filter(Boolean).map(s=>`<li>${esc(s)}</li>`).join("");
+  const cur=j.currency||DB.meta.defaultCurrency;
+  const b=j.salaryBrut>0?salaryBreakdown(j.salaryBrut):null;
+  document.getElementById("report").innerHTML=`<div class="rep">
+    ${repHeader("Fiche de poste — "+j.intitule, (DB.meta.cabinetName||"BSM Advisory & Consulting"))}
+    <table><tr><th>Catégorie</th><td>${esc(j.category||"—")}</td><th>Pôle / service</th><td>${esc(j.pole||"—")}</td></tr>
+      <tr><th>Type de contrat</th><td>${esc(j.contractType||"—")}</td><th>Rattachement</th><td>${esc(j.rattachement||"—")}</td></tr>
+      <tr><th>Lieu de travail</th><td>${esc(j.lieu||"—")}</td><th>Salaire brut mensuel</th><td>${j.salaryBrut>0?fmt(j.salaryBrut,cur):"À définir"}</td></tr></table>
+    ${j.raisonEtre?`<h2>Raison d'être du poste</h2><p>${esc(j.raisonEtre)}</p>`:""}
+    ${j.responsabilites?`<h2>Missions & responsabilités</h2><ul>${bullets(j.responsabilites)}</ul>`:""}
+    ${j.competences?`<h2>Compétences & qualités requises</h2><ul>${bullets(j.competences)}</ul>`:""}
+    ${j.profil?`<h2>Profil recherché</h2><p>${esc(j.profil)}</p>`:""}
+    <h2>Conditions & cadre légal (Madagascar — Code du travail, Loi n°2003-044)</h2>
+    <table><tr><th>Durée légale du travail</th><td>${L.dureeHebdo} h/semaine (${L.dureeMensuelle} h/mois)</td></tr>
+      <tr><th>Congés payés</th><td>${L.congesParMois} jours ouvrables/mois (≈ 30 j/an)</td></tr>
+      <tr><th>Période d'essai</th><td>${esc(j.essai||"Selon catégorie et Code du travail")}</td></tr>
+      <tr><th>Préavis</th><td>${esc(j.preavis||"Selon ancienneté et catégorie")}</td></tr>
+      <tr><th>Cotisations sociales</th><td>CNaPS : ${L.cnapsSal}% salarié / ${L.cnapsPat}% employeur — Santé (OSTIE) : ${L.ostieSal}% / ${L.ostiePat}%</td></tr>
+      ${b?`<tr><th>Coût employeur estimé</th><td>${fmt(b.cout,cur)}/mois (brut ${fmt(b.brut,cur)} + charges patronales ${fmt(b.chargesPat,cur)})</td></tr>`:""}
+    </table>
+    <p class="meta">Document généré le ${frDate(todayISO())}. Valeurs légales indicatives à confirmer selon les décrets en vigueur.</p>
+  </div>`;
+  window.print();
+}
+function openLegalSettings(){
+  const L=mgLegal();
+  openModal(`
+    <span class="close" onclick="closeModal()">✕</span>
+    <h2>Cadre légal — Madagascar</h2>
+    <div class="msub">Paramètres appliqués aux fiches de poste et au calcul du coût salarial. Ajustez selon le décret en vigueur.</div>
+    <div class="field row2"><label>Durée légale — h/semaine & h/mois</label>
+      <input type="number" id="f-lhebdo" value="${L.dureeHebdo}"><input type="number" step="0.01" id="f-lmens" value="${L.dureeMensuelle}"></div>
+    <div class="field"><label>Congés payés (jours / mois)</label><input type="number" step="0.5" id="f-lconges" value="${L.congesParMois}"></div>
+    <div class="field row2"><label>CNaPS — % salarié & % employeur</label>
+      <input type="number" step="0.1" id="f-lcnapss" value="${L.cnapsSal}"><input type="number" step="0.1" id="f-lcnapsp" value="${L.cnapsPat}"></div>
+    <div class="field row2"><label>Santé / OSTIE — % salarié & % employeur</label>
+      <input type="number" step="0.1" id="f-losties" value="${L.ostieSal}"><input type="number" step="0.1" id="f-lostiep" value="${L.ostiePat}"></div>
+    <div class="hint">Modifier les taux recalcule le coût employeur de tous les salaires (charge budget mise à jour au prochain enregistrement d'un collaborateur).</div>
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="saveLegalSettings()">Enregistrer</button></div>`);
+}
+function saveLegalSettings(){
+  const L=mgLegal(); const num=(id,d)=>{const v=parseFloat(val(id));return isNaN(v)?d:v;};
+  L.dureeHebdo=num("f-lhebdo",L.dureeHebdo); L.dureeMensuelle=num("f-lmens",L.dureeMensuelle); L.congesParMois=num("f-lconges",L.congesParMois);
+  L.cnapsSal=num("f-lcnapss",L.cnapsSal); L.cnapsPat=num("f-lcnapsp",L.cnapsPat); L.ostieSal=num("f-losties",L.ostieSal); L.ostiePat=num("f-lostiep",L.ostiePat);
+  save(); closeModal(); renderRH(); toast("Cadre légal enregistré.");
+}
+/* ---- Primes (catalogue + attribution → budget/CA) ---- */
+function primeById(id){ return DB.primes.find(p=>p.id===id); }
+function primeAmount(prime, emp){
+  if(!prime) return 0;
+  if(prime.type==="pourcentage"){ const base = prime.base==="cout"? employerCost((emp&&emp.salaryBrut)||0) : ((emp&&emp.salaryBrut)||0); return Math.round(base*(prime.value||0)/100); }
+  return Math.round(prime.value||0);
+}
+function rhPrimes(){
+  const cat=DB.primes.slice();
+  const attribs=DB.transactions.filter(t=>t.category==="Primes & indemnités").sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  const totalPrev=attribs.filter(t=>t.status==="prevu").reduce((s,t)=>s+toDefault(t.amount,t.currency),0);
+  return `
+    <div class="card" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">Catalogue des primes</h2>
+        <button class="cta ghost sm" onclick="openPrimeForm()">+ Nouveau type de prime</button></div>
+      ${cat.length?`<table style="margin-top:10px"><thead><tr><th>Prime</th><th>Type</th><th>Valeur</th><th>Critères</th><th></th></tr></thead><tbody>`+
+        cat.map(p=>`<tr><td><b>${esc(p.label)}</b></td><td>${p.type==="pourcentage"?"Pourcentage":"Montant fixe"}</td>
+          <td>${p.type==="pourcentage"?(p.value+" % du "+(p.base==="cout"?"coût chargé":"brut")):fmtD(p.value)}</td>
+          <td style="font-size:11.5px;color:var(--muted);max-width:260px">${esc(p.criteres||"—")}</td>
+          <td><div class="rowact"><button class="iconbtn" title="Attribuer à un collaborateur" onclick="openPrimeAttrib('','${p.id}')">➕</button><button class="iconbtn" onclick="openPrimeForm('${p.id}')">✎</button><button class="iconbtn del" onclick="deletePrime('${p.id}')">🗑</button></div></td></tr>`).join("")+`</tbody></table>`
+        :`<div class="empty" style="margin-top:10px">Aucun type de prime. Créez-en (ex : Prime de performance 10 % du brut ; Prime de transport 50 000 Ar). Critères modifiables.</div>`}
+    </div>
+    <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap"><h2 style="margin:0">Primes attribuées</h2>${totalPrev>0?`<span class="badge b-orange">À verser : ${fmtD(totalPrev)}</span>`:""}</div>
+      ${attribs.length?`<table style="margin-top:10px"><thead><tr><th>Collaborateur</th><th>Prime</th><th>Date</th><th style="text-align:right">Montant</th><th>Statut</th><th></th></tr></thead><tbody>`+
+        attribs.map(t=>`<tr><td><b>${esc(empName(t.employeeId))}</b></td><td>${esc(t.label)}</td><td>${t.date?frDate(t.date):"—"}</td>
+          <td style="text-align:right;color:var(--red)">${fmt(t.amount,t.currency)}</td>
+          <td><span class="badge ${t.status==='realise'?'b-green':'b-orange'}">${t.status==='realise'?'Versée':'Prévue'}</span></td>
+          <td><div class="rowact">${t.status==='prevu'?`<button class="iconbtn" title="Marquer versée" onclick="primeMarkVersee('${t.id}')">✓</button>`:""}<button class="iconbtn del" onclick="deletePrimeAttrib('${t.id}')">🗑</button></div></td></tr>`).join("")+`</tbody></table>`
+        :`<div class="empty">Aucune prime attribuée. Les primes alimentent automatiquement le budget, le CA et le compte de résultat (charges de personnel).</div>`}
+    </div>`;
+}
+function openPrimeForm(id){
+  const p=id?DB.primes.find(x=>x.id===id):{type:"pourcentage",base:"brut",value:10,active:true};
+  openModal(`
+    <span class="close" onclick="closeModal()">✕</span>
+    <h2>${id?"Modifier la prime":"Nouveau type de prime"}</h2>
+    <div class="field"><label>Nom de la prime *</label><input id="f-plabel" value="${esc(p.label||'')}" placeholder="Ex : Prime de performance"></div>
+    <div class="field"><label>Type de calcul</label>
+      <div class="segmented" style="display:flex;width:100%">
+        <button type="button" id="p-seg-pct" class="${p.type==='pourcentage'?'active':''}" style="flex:1" onclick="primeTypeSwitch('pourcentage')">Pourcentage</button>
+        <button type="button" id="p-seg-mnt" class="${p.type!=='pourcentage'?'active':''}" style="flex:1" onclick="primeTypeSwitch('montant')">Montant fixe</button>
+      </div><input type="hidden" id="f-ptype" value="${p.type||'pourcentage'}"></div>
+    <div class="field row2"><label>Valeur & base (pour les %)</label>
+      <input type="number" step="any" id="f-pvalue" value="${p.value!=null?p.value:''}">
+      <select id="f-pbase"><option value="brut" ${p.base!=='cout'?'selected':''}>du salaire brut</option><option value="cout" ${p.base==='cout'?'selected':''}>du coût chargé</option></select></div>
+    <div class="field"><label>Critères d'attribution</label><textarea id="f-pcriteres" rows="2" placeholder="Ex : objectifs commerciaux atteints, ancienneté > 1 an…">${esc(p.criteres||'')}</textarea></div>
+    <div class="hint">Un montant fixe s'applique tel quel ; un pourcentage se calcule automatiquement sur le collaborateur choisi lors de l'attribution.</div>
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="savePrime('${id||''}')">Enregistrer</button></div>`);
+}
+function primeTypeSwitch(tp){ document.getElementById("f-ptype").value=tp; document.getElementById("p-seg-pct").classList.toggle("active",tp==="pourcentage"); document.getElementById("p-seg-mnt").classList.toggle("active",tp!=="pourcentage"); }
+function savePrime(id){
+  const label=val("f-plabel").trim(); if(!label){toast("Le nom est obligatoire.");return;}
+  const value=parseFloat(val("f-pvalue")); if(isNaN(value)||value<0){toast("Valeur invalide.");return;}
+  const obj={label,type:val("f-ptype"),value,base:val("f-pbase"),criteres:val("f-pcriteres"),active:true};
+  if(id){Object.assign(DB.primes.find(x=>x.id===id),obj);}else{obj.id=uid();DB.primes.push(obj);}
+  save();closeModal();renderRH();toast("Prime enregistrée.");
+}
+function deletePrime(id){ const p=DB.primes.find(x=>x.id===id); confirmModal("Supprimer ce type de prime ?", esc(p.label)+" (les primes déjà attribuées sont conservées).", ()=>{DB.primes=DB.primes.filter(x=>x.id!==id);save();renderRH();toast("Supprimé.");}); }
+function openPrimeAttrib(employeeId, primeId){
+  if(!DB.employees.length){ toast("Ajoute d'abord un collaborateur."); return; }
+  const emp0=employeeId||DB.employees[0].id;
+  openModal(`
+    <span class="close" onclick="closeModal()">✕</span>
+    <h2>Attribuer une prime</h2>
+    <div class="field"><label>Collaborateur</label><select id="f-paemp" onchange="primeAttribPreview()">${DB.employees.map(e=>`<option value="${e.id}" ${emp0===e.id?'selected':''}>${esc(e.name)}</option>`).join("")}</select></div>
+    <div class="field"><label>Prime</label><select id="f-paprime" onchange="primeAttribPreview()"><option value="">— Prime ponctuelle (montant libre) —</option>${DB.primes.map(p=>`<option value="${p.id}" ${primeId===p.id?'selected':''}>${esc(p.label)} (${p.type==='pourcentage'?p.value+' %':fmtD(p.value)})</option>`).join("")}</select></div>
+    <div class="field row2"><label>Montant & devise</label>
+      <input type="number" id="f-paamount" value=""><select id="f-pacur">${["MGA","EUR"].map(c=>`<option value="${c}">${c==='MGA'?'Ariary':'Euro'}</option>`).join("")}</select></div>
+    <div class="hint" id="pa-preview"></div>
+    <div class="field row2"><label>Date & statut</label>
+      <input type="date" id="f-padate" value="${todayISO()}">
+      <select id="f-pastatus"><option value="prevu">Prévue (à verser)</option><option value="realise">Versée</option></select></div>
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="savePrimeAttrib()">Attribuer</button></div>`);
+  primeAttribPreview();
+}
+function primeAttribPreview(){
+  const emp=DB.employees.find(e=>e.id===val("f-paemp")); const prime=primeById(val("f-paprime"));
+  const amtEl=document.getElementById("f-paamount"), curEl=document.getElementById("f-pacur"), prev=document.getElementById("pa-preview");
+  if(emp&&curEl) curEl.value=emp.salaryCurrency||DB.meta.defaultCurrency;
+  if(prime){ const a=primeAmount(prime,emp); if(amtEl) amtEl.value=a;
+    if(prev) prev.innerHTML=prime.type==="pourcentage"
+      ? `${prime.value} % du ${prime.base==='cout'?'coût chargé':'brut'} de ${esc(emp?emp.name:'')} = <b>${fmt(a,curEl?curEl.value:DB.meta.defaultCurrency)}</b>${!(emp&&emp.salaryBrut>0)?' — ⚠️ salaire non renseigné, montant nul':''}`
+      : `Montant fixe : <b>${fmt(a,curEl?curEl.value:DB.meta.defaultCurrency)}</b> — ajustable ci-dessus.`;
+  } else if(prev){ prev.innerHTML="Prime ponctuelle : saisissez un montant libre."; }
+}
+function savePrimeAttrib(){
+  const emp=DB.employees.find(e=>e.id===val("f-paemp")); if(!emp){ toast("Choisir un collaborateur."); return; }
+  const amount=parseFloat(val("f-paamount")); if(isNaN(amount)||amount<=0){ toast("Montant invalide."); return; }
+  const prime=primeById(val("f-paprime"));
+  DB.transactions.push({ id:uid(), sens:"sortant", label:"Prime"+(prime?" "+prime.label:"")+" — "+emp.name, amount:Math.round(amount),
+    currency:val("f-pacur"), category:"Primes & indemnités", clientId:"", employeeId:emp.id, primeId:prime?prime.id:"",
+    date:val("f-padate"), dueDate:val("f-padate"), status:val("f-pastatus"), method:"" });
+  save(); closeModal(); rhTab="primes"; refreshAll(); toast("Prime attribuée — budget & CA mis à jour.");
+}
+function primeMarkVersee(id){ const t=DB.transactions.find(x=>x.id===id); if(!t) return; t.status="realise"; if(!t.date) t.date=todayISO(); save(); refreshAll(); toast("Prime marquée versée."); }
+function deletePrimeAttrib(id){ const t=DB.transactions.find(x=>x.id===id); confirmModal("Supprimer cette prime attribuée ?", esc(t.label)+" — "+fmt(t.amount,t.currency), ()=>{ DB.transactions=DB.transactions.filter(x=>x.id!==id); save(); refreshAll(); toast("Prime supprimée."); }); }
 function rhRecrutement(){
   const list=DB.recruitments.slice();
   return `<div class="card">${list.length?`<table><thead><tr><th>Poste</th><th>Pôle</th><th>Statut</th><th>Candidats</th><th>Ouvert le</th><th></th></tr></thead><tbody>`+
@@ -2570,6 +2927,7 @@ applyBranding();
 applyTheme();
 renderDashboard();
 updateAdviceBadge();
+window.addEventListener("message", onSimulatorMessage); // réception des devis du simulateur (iframe)
 if(portalNeeded()) showPortal();
 </script>
 <script>if('serviceWorker' in navigator && location.protocol.startsWith('http')){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
