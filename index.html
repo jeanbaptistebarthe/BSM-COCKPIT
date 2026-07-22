@@ -397,52 +397,10 @@ function defaultDB(){
 }
 
 function seedDB(){
+  // Base vierge : tout est saisi par BSM. Seule exception demandée : Leader Price conservé en prospect.
   const d = defaultDB();
-  const t = new Date();
-  const iso = (offset)=>{ const x=new Date(t); x.setDate(x.getDate()+offset); return x.toISOString().slice(0,10); };
-  const c1=uid(), c2=uid(), c3=uid();
   d.clients=[
-    {id:c1, company:"Groupe Meridian", sector:"Industrie / Distribution", contactName:"PDG Meridian", contactEmail:"pdg@meridian-demo.mg", contactPhone:"+261 32 00 000 00", status:"actif", notes:"Exemple fictif — mission diagnostic en cours.", createdAt:iso(-45)},
-    {id:c2, company:"Leader Price", sector:"Industrie / Distribution", contactName:"Dir. Financier", contactEmail:"contact@leaderprice-demo.mg", contactPhone:"+261 34 11 111 11", status:"prospect", notes:"Exemple fictif — en négociation.", createdAt:iso(-20)},
-    {id:c3, company:"BMOI", sector:"Banque / Finance", contactName:"Resp. Conformité", contactEmail:"conformite@bmoi-demo.mg", contactPhone:"+261 32 22 222 22", status:"prospect", notes:"Exemple fictif — proposition envoyée.", createdAt:iso(-12)}
-  ];
-  d.events=[
-    {id:uid(), clientId:c1, type:"audit", title:"Audit sécurité SI — Meridian", date:iso(3), time:"09:00", location:"Sur site", status:"planifie", notes:"Exemple fictif."},
-    {id:uid(), clientId:c2, type:"prospect", title:"Relance commerciale Leader Price", date:iso(1), time:"14:00", location:"Téléphone", status:"planifie", notes:""},
-    {id:uid(), clientId:c3, type:"rdv", title:"Présentation offre BMOI", date:iso(-2), time:"10:30", location:"Visio", status:"planifie", notes:"À passer en 'réalisé' ou 'annulé'."}
-  ];
-  d.transactions=[
-    {id:uid(), sens:"entrant", label:"Honoraires diagnostic Meridian", amount:22500000, currency:"MGA", method:"Virement", category:"Honoraires mission", clientId:c1, date:iso(-15), dueDate:iso(-15), status:"realise"},
-    {id:uid(), sens:"entrant", label:"2e échéance mission Meridian", amount:18000000, currency:"MGA", method:"", category:"Honoraires mission", clientId:c1, date:iso(10), dueDate:iso(-3), status:"prevu"},
-    {id:uid(), sens:"entrant", label:"Proposition Leader Price", amount:6800, currency:"EUR", method:"", category:"Honoraires mission", clientId:c2, date:iso(25), dueDate:iso(25), status:"prevu"},
-    {id:uid(), sens:"sortant", label:"Loyer bureau Ivato", amount:1500000, currency:"MGA", method:"Virement", category:"Loyer / Bureau", clientId:"", date:iso(-8), dueDate:iso(-8), status:"realise"},
-    {id:uid(), sens:"sortant", label:"Déplacement mission client", amount:450000, currency:"MGA", method:"Espèces", category:"Déplacements", clientId:c1, date:iso(-5), dueDate:iso(-5), status:"realise"}
-  ];
-  const e1=uid();
-  d.employees=[
-    {id:e1, name:"Jean-Baptiste Barthe", poste:"Directeur fondateur / Consultant senior", pole:"Direction", permission:"Administrateur", contract:"CDI", hireDate:iso(-500), status:"actif", phone:"", email:"", secteurs:"Audit, Risques, Commercial", missionsAff:"Diagnostic R5 — Meridian", notes:"Exemple — modifiable."},
-    {id:uid(), name:"Consultant junior", poste:"Analyste des risques", pole:"Analyse des risques", permission:"Analyste", contract:"Poste à pourvoir", hireDate:"", status:"recrutement", phone:"", email:"", secteurs:"Audit", missionsAff:"", notes:"Poste à pourvoir (exemple)."}
-  ];
-  d.recruitments=[
-    {id:uid(), poste:"Analyste des risques junior", pole:"Analyse des risques", status:"ouvert", candidates:"3 CV reçus", openedDate:iso(-15), notes:"Exemple fictif — entretiens à planifier."}
-  ];
-  d.leaves=[
-    {id:uid(), employeeId:e1, type:"Mission terrain", start:iso(3), end:iso(4), status:"approuve", notes:"Audit Meridian sur site."}
-  ];
-  d.activities=[
-    {id:uid(), employeeId:e1, date:iso(-2), missionRef:"", label:"Préparation audit Meridian", hours:4, notes:""}
-  ];
-  const m1=uid();
-  d.missions=[
-    {id:m1, ref:"MIS-001", clientId:c1, type:"Diagnostic R5", phase:"RESPOND", startDate:iso(-45), endDate:iso(30), montantHT:65000000, currency:"MGA", acompte:20000000, nda:true, contrat:true, rapport:false, status:"en_cours", consultantId:e1, notes:"Exemple fictif."}
-  ];
-  const rk1=uid(), rk2=uid();
-  d.risks=[
-    {id:rk1, ref:"R-001", clientId:c1, missionId:m1, famille:"IT", categorie:"Cyberattaque", description:"Exposition aux intrusions/rançongiciels sur le SI de gestion.", probabilite:4, impact:5, mesures:"Antivirus basique", efficacite:"Partielle", dejaMat:false, recoBSM:"Sauvegardes hors-ligne (3-2-1) + MFA + plan de réponse à incident.", responsable:"DSI", delai:"< 15 jours", status:"a_traiter", dateSaisie:iso(-30), obs:""},
-    {id:rk2, ref:"R-002", clientId:c1, missionId:m1, famille:"Logistique", categorie:"Fournisseur unique", description:"Fournisseur unique sur un composant stratégique de la chaîne.", probabilite:3, impact:4, mesures:"Aucune", efficacite:"", dejaMat:false, recoBSM:"Qualifier un fournisseur alternatif + stock de sécurité.", responsable:"DOP", delai:"< 30 jours", status:"a_traiter", dateSaisie:iso(-30), obs:""}
-  ];
-  d.recommendations=[
-    {id:uid(), ref:"REC-001", clientId:c1, riskId:rk1, texte:"Mettre en place des sauvegardes hors-ligne et l'authentification MFA.", horizon:"Prioritaire (< 15j)", priorite:"Critique", responsable:"DSI", moyens:"Budget IT interne", indicateur:"Sauvegardes testées chaque mois", status:"a_faire", dateCible:iso(15), dateReal:"", avancement:0, commentaire:""}
+    {id:uid(), company:"Leader Price", sector:"Industrie / Distribution", contactName:"", contactEmail:"", contactPhone:"", status:"prospect", notes:"", createdAt:todayISO()}
   ];
   return d;
 }
@@ -742,6 +700,9 @@ function openClientForm(id){
         <button type="button" class="cta" style="padding:7px 12px;font-size:12.5px" onclick="openClientMission('${id}')">➕ Créer la mission & l'échéancier</button>
         <span style="font-size:12px;color:var(--muted)">${DB.missions.filter(mm=>mm.clientId===id).length} mission(s) liée(s) — le montant et les entrées d'argent se saisissent <b>une seule fois</b> ici.</span></div>`
       :`<div class="hint">Enregistrez d'abord le client, puis créez la mission liée : le montant et l'échéancier alimenteront automatiquement le Budget & le CA (aucune re-saisie).</div>`}</div>
+    <div class="field"><label>Fiches réflexes</label>
+      <label style="font-weight:400;font-size:13px"><input type="checkbox" id="f-cfiches" ${c.fichesDues?'checked':''}> Le contrat prévoit l'envoi des fiches réflexes à ce client</label>
+      ${c.fichesSentDate?`<div class="hint" style="margin-top:4px">Dernier envoi : ${frDate(c.fichesSentDate)}.</div>`:''}</div>
     <div class="field"><label>Résumé de mission</label><textarea id="f-msum" rows="2">${esc(c.missionSummary||'')}</textarea></div>
     <div class="field"><label>Résumé de suivi</label><textarea id="f-fsum" rows="2">${esc(c.followupSummary||'')}</textarea></div>
     <div class="field"><label>Notes</label><textarea id="f-notes" rows="2">${esc(c.notes||'')}</textarea></div>
@@ -753,7 +714,8 @@ function saveClient(id){
   const obj={ company, sector:val("f-sector"), contactName:val("f-cname"), contactPhone:val("f-cphone"),
     contactEmail:val("f-cemail"), status:val("f-status"), notes:val("f-notes"),
     signatureDate:val("f-sign"), contractType:val("f-ctype"), ndaSigned:document.getElementById("f-cnda").checked,
-    ndaDate:val("f-cndadate"), contractInfo:val("f-cinfo"), missionSummary:val("f-msum"), followupSummary:val("f-fsum") };
+    ndaDate:val("f-cndadate"), contractInfo:val("f-cinfo"), missionSummary:val("f-msum"), followupSummary:val("f-fsum"),
+    fichesDues:document.getElementById("f-cfiches").checked };
   if(id){ Object.assign(DB.clients.find(x=>x.id===id), obj); }
   else { obj.id=uid(); obj.createdAt=todayISO(); DB.clients.push(obj); }
   save(); closeModal(); refreshAll(); toast("Client enregistré.");
@@ -882,9 +844,19 @@ function defaultPlaybooks(){ return [
   {id:uid(),icon:"📢",title:"Crise réputationnelle",steps:["Ne jamais répondre à chaud sur les réseaux sociaux","Centraliser la communication auprès d'un seul porte-parole","Alerter BSM pour activer la stratégie de communication de crise","Préparer un communiqué de position sous 4h","Monitorer les mentions et le sentiment en continu"]}
 ]; }
 function renderFiches(){
+  const dus=DB.clients.filter(c=>c.fichesDues);
   document.getElementById("scr-fiches").innerHTML=`
-    <div class="pagetitle"><div><h1>Fiches réflexes</h1><div class="sub">Procédures d'urgence par type de crise — modifiables & imprimables</div></div>
-      <button class="cta" onclick="openFicheForm()">+ Nouvelle fiche</button></div>
+    <div class="pagetitle"><div><h1>Fiches réflexes</h1><div class="sub">Procédures d'urgence par type de crise — modifiables, imprimables & transmissibles aux clients</div></div>
+      <div style="display:flex;gap:8px"><button class="cta ghost" onclick="openFichesTransmit()">📤 Transmettre à un client</button><button class="cta" onclick="openFicheForm()">+ Nouvelle fiche</button></div></div>
+    <div class="card" style="margin-bottom:12px">
+      <h2>Transmission contractuelle</h2>
+      ${dus.length? `<table style="margin-top:8px"><thead><tr><th>Client</th><th>Dernier envoi</th><th>Fiches envoyées</th><th></th></tr></thead><tbody>`+
+        dus.map(c=>{const never=!c.fichesSentDate;return `<tr><td><b>${clientLink(c.id)}</b></td>
+          <td>${c.fichesSentDate?frDate(c.fichesSentDate):`<span class="badge b-orange">Jamais</span>`}</td>
+          <td style="font-size:11.5px;color:var(--muted)">${(c.fichesSent&&c.fichesSent.length)?esc(c.fichesSent[c.fichesSent.length-1].titles.join(", ")):"—"}</td>
+          <td style="text-align:right"><button class="cta ${never?'':'ghost'} sm" onclick="openFichesTransmit('${c.id}')">${never?'Transmettre':'Renvoyer'}</button></td></tr>`;}).join("")+`</tbody></table>`
+        : `<div class="hint" style="margin-top:6px">Aucun client dont le contrat prévoit l'envoi des fiches réflexes. Cochez « Le contrat prévoit l'envoi… » dans la fiche d'un client.</div>`}
+    </div>
     <div class="grid3">
       ${DB.playbooks.length? DB.playbooks.map(f=>`
         <div class="fiche-card">
@@ -933,6 +905,43 @@ function saveFiche(id){
 function deleteFiche(id){
   const f=DB.playbooks.find(x=>x.id===id);
   confirmModal("Supprimer cette fiche ?", f?esc(f.title):"", ()=>{ DB.playbooks=DB.playbooks.filter(x=>x.id!==id); save(); renderFiches(); toast("Fiche supprimée."); });
+}
+/* ---- Transmission des fiches réflexes aux clients ---- */
+function openFichesTransmit(clientId){
+  if(!DB.playbooks.length){ toast("Aucune fiche réflexe à transmettre."); return; }
+  if(!DB.clients.length){ toast("Ajoute d'abord un client."); return; }
+  const dft = clientId || (DB.clients.find(c=>c.fichesDues)||DB.clients[0]).id;
+  openModal(`
+    <span class="close" onclick="closeModal()">✕</span>
+    <h2>Transmettre les fiches réflexes</h2>
+    <div class="msub">Génère un document PDF pour le client et enregistre l'envoi.</div>
+    <div class="field"><label>Client destinataire</label>
+      <select id="f-txclient">${DB.clients.map(c=>`<option value="${c.id}" ${dft===c.id?'selected':''}>${esc(c.company)}${c.fichesDues?' — contrat prévoit l’envoi':''}</option>`).join("")}</select></div>
+    <div class="field"><label>Fiches à inclure</label>
+      <div style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px">
+        ${DB.playbooks.map(f=>`<label style="display:flex;align-items:center;gap:8px;font-weight:400;padding:4px 2px"><input type="checkbox" class="fiche-tx" value="${f.id}" checked> <span>${f.icon||'📄'} ${esc(f.title)}</span></label>`).join("")}
+      </div></div>
+    <div class="hint">Le PDF reprend l'en-tête du cabinet et le nom du client, avec chaque fiche et ses étapes numérotées.</div>
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="doFichesTransmit()">📄 Générer & enregistrer l'envoi</button></div>`);
+}
+function doFichesTransmit(){
+  const clientId=val("f-txclient"); const c=DB.clients.find(x=>x.id===clientId); if(!c){ toast("Client introuvable."); return; }
+  const ids=[...document.querySelectorAll(".fiche-tx")].filter(x=>x.checked).map(x=>x.value);
+  if(!ids.length){ toast("Sélectionnez au moins une fiche."); return; }
+  const titles=ids.map(id=>{const f=DB.playbooks.find(x=>x.id===id);return f?f.title:"";}).filter(Boolean);
+  c.fichesSent=c.fichesSent||[]; c.fichesSent.push({date:todayISO(), ids, titles}); c.fichesSentDate=todayISO();
+  save(); closeModal(); printFichesForClient(clientId, ids); renderFiches(); toast("Envoi enregistré pour "+c.company+".");
+}
+function printFichesForClient(clientId, ids){
+  const c=DB.clients.find(x=>x.id===clientId); if(!c) return;
+  const fiches=(ids&&ids.length? ids.map(id=>DB.playbooks.find(x=>x.id===id)).filter(Boolean) : DB.playbooks);
+  document.getElementById("report").innerHTML=`<div class="rep">
+    ${repHeader("Fiches réflexes — "+esc(c.company),"Procédures d'urgence · "+(DB.meta.cabinetName||"BSM Advisory & Consulting"))}
+    <p class="meta">Destinataire : ${esc(c.company)}${c.contactName?" · "+esc(c.contactName):""} · Transmis le ${frDate(todayISO())}.</p>
+    ${fiches.map(f=>`<h2>${f.icon||'📄'} ${esc(f.title)}</h2><ol>${(f.steps||[]).map(s=>`<li>${esc(s)}</li>`).join("")}</ol>`).join("")}
+    <p class="meta">Document transmis dans le cadre du contrat de gouvernance des risques R5®. En cas de crise, contacter ${esc(DB.meta.cabinetName||"BSM Advisory & Consulting")}.</p>
+  </div>`;
+  window.print();
 }
 
 /* ----------------------------- Commercial (simulateur intégré) ----------------------------- */
@@ -1545,6 +1554,11 @@ function generateAdvice(){
     add("nosal-"+e.id,"info","💶","Salaire non renseigné",
       `${e.name} est actif mais sans salaire saisi : sa charge n'apparaît pas dans le budget ni le compte de résultat. Renseigner son salaire brut dans RH.`);
   });
+  // 2d. Fiches réflexes dues par contrat mais jamais transmises
+  DB.clients.filter(c=>c.fichesDues && !c.fichesSentDate).forEach(c=>{
+    add("fiches-"+c.id,"warn","🆘","Fiches réflexes à transmettre",
+      `Le contrat de ${c.company} prévoit l'envoi des fiches réflexes, mais elles n'ont jamais été transmises. Les envoyer depuis l'onglet Fiches réflexes.`);
+  });
   // 3. Prospects sans relance récente
   DB.clients.filter(c=>c.status==="prospect").forEach(c=>{
     const evs=DB.events.filter(e=>e.clientId===c.id);
@@ -1763,8 +1777,8 @@ function importData(ev){
   r.readAsText(f); ev.target.value="";
 }
 function resetData(){
-  confirmModal("Tout réinitialiser ?","Toutes les données de ce cockpit seront effacées et remplacées par des exemples fictifs. Pensez à exporter une sauvegarde avant.",()=>{
-    DB=seedDB(); save(); closeModal(); refreshAll(); toast("Données réinitialisées.");});
+  confirmModal("Repartir sur une base vierge ?","Toutes les données de ce cockpit seront effacées pour repartir à neuf (seul « Leader Price » reste en prospect). Les fiches réflexes par défaut sont conservées. Pensez à exporter une sauvegarde avant.",()=>{
+    DB=seedDB(); DB.meta.playbooksSeeded=false; save(); load(); closeModal(); refreshAll(); toast("Cockpit remis à neuf.");});
 }
 
 /* ----------------------------- Ajout rapide ----------------------------- */
