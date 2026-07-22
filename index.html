@@ -723,14 +723,30 @@ function saveClient(id){
 function openClientMission(clientId){ closeModal(); setScreen("missions"); openMissionForm(null, clientId); }
 function deleteClient(id){
   const c=DB.clients.find(x=>x.id===id);
-  const linked=DB.events.filter(e=>e.clientId===id).length + DB.transactions.filter(t=>t.clientId===id).length;
-  confirmModal(`Supprimer « ${esc(c.company)} » ?`,
-    linked? `Ce client est lié à ${linked} élément(s) (événements / mouvements). Ils ne seront pas supprimés mais perdront le lien.<br><br>Astuce : passez-le plutôt en <b>Archivé</b> si vous voulez conserver l'historique.`
-          : `Cette action est définitive.`,
+  const nTx=DB.transactions.filter(t=>t.clientId===id).length;
+  const nMis=DB.missions.filter(m=>m.clientId===id).length;
+  const nEv=DB.events.filter(e=>e.clientId===id).length;
+  const nRi=DB.risks.filter(r=>r.clientId===id).length;
+  const nRe=DB.recommendations.filter(r=>r.clientId===id).length;
+  const nDe=DB.devis.filter(d=>d.clientId===id).length;
+  const nDoc=DB.documents.filter(d=>d.clientId===id).length;
+  const nRec=DB.recurring.filter(r=>r.clientId===id).length;
+  const parts=[]; const P=(n,s)=>{ if(n) parts.push(n+" "+s); };
+  P(nMis,"mission(s)"); P(nTx,"mouvement(s) d'argent"); P(nDe,"devis"); P(nEv,"événement(s)"); P(nRi,"risque(s)"); P(nRe,"recommandation(s)"); P(nDoc,"document(s)"); P(nRec,"charge(s) récurrente(s)");
+  confirmModal(`Supprimer « ${esc(c.company)} » et toutes ses données ?`,
+    (parts.length? `Seront <b>définitivement supprimés</b> : ${parts.join(", ")} — y compris leur impact sur le budget et le chiffre d'affaires.<br><br>` : "")+
+    `Pour conserver l'historique, passez plutôt le client en <b>Archivé</b>.`,
     ()=>{ DB.clients=DB.clients.filter(x=>x.id!==id);
-      DB.events.forEach(e=>{if(e.clientId===id)e.clientId="";});
-      DB.transactions.forEach(t=>{if(t.clientId===id)t.clientId="";});
-      save(); renderClients(); toast("Client supprimé."); });
+      DB.transactions=DB.transactions.filter(t=>t.clientId!==id);
+      DB.missions=DB.missions.filter(m=>m.clientId!==id);
+      DB.events=DB.events.filter(e=>e.clientId!==id);
+      DB.risks=DB.risks.filter(r=>r.clientId!==id);
+      DB.recommendations=DB.recommendations.filter(r=>r.clientId!==id);
+      DB.devis=DB.devis.filter(d=>d.clientId!==id);
+      DB.documents=DB.documents.filter(d=>d.clientId!==id);
+      DB.recurring=DB.recurring.filter(r=>r.clientId!==id);
+      if(focusClient===id) focusClient="";
+      save(); setScreen("clients"); toast(`« ${c.company} » et ses données supprimés.`); });
 }
 
 /* ----------------------------- Fiche client 360° + Scores R5 ----------------------------- */
@@ -1171,7 +1187,7 @@ function saveEvent(id){
 }
 function deleteEvent(id){
   const e=DB.events.find(x=>x.id===id);
-  confirmModal("Supprimer cet événement ?", esc(e.title), ()=>{ DB.events=DB.events.filter(x=>x.id!==id); save(); renderAgenda(); toast("Événement supprimé."); });
+  confirmModal("Supprimer cet événement ?", esc(e.title), ()=>{ DB.events=DB.events.filter(x=>x.id!==id); save(); refreshAll(); toast("Événement supprimé."); });
 }
 
 /* ----------------------------- Budget ----------------------------- */
@@ -1286,7 +1302,8 @@ function saveTx(id){
 }
 function deleteTx(id){
   const t=DB.transactions.find(x=>x.id===id);
-  confirmModal("Supprimer ce mouvement ?", `${esc(t.label)} — ${fmt(t.amount,t.currency)}`, ()=>{ DB.transactions=DB.transactions.filter(x=>x.id!==id); save(); renderBudget(); toast("Mouvement supprimé."); });
+  const linkNote = t.recurringId? "<br><br>⚠️ Ce mouvement est <b>récurrent</b> : il sera régénéré automatiquement au prochain démarrage. Pour l'arrêter, désactivez le récurrent (🔁 Récurrents ou fiche du collaborateur)." : "";
+  confirmModal("Supprimer ce mouvement ?", `${esc(t.label)} — ${fmt(t.amount,t.currency)}`+linkNote, ()=>{ DB.transactions=DB.transactions.filter(x=>x.id!==id); save(); refreshAll(); toast("Mouvement supprimé."); });
 }
 
 /* ----------------------------- Chiffre d'affaires ----------------------------- */
@@ -2029,7 +2046,7 @@ function saveRisk(id){
 }
 function deleteRisk(id){
   const r=DB.risks.find(x=>x.id===id);
-  confirmModal("Supprimer ce risque ?", esc(r.description||r.categorie||r.ref||""), ()=>{DB.risks=DB.risks.filter(x=>x.id!==id);save();renderRisks();toast("Risque supprimé.");});
+  confirmModal("Supprimer ce risque ?", esc(r.description||r.categorie||r.ref||""), ()=>{DB.risks=DB.risks.filter(x=>x.id!==id);DB.recommendations.forEach(x=>{if(x.riskId===id)x.riskId="";});save();refreshAll();toast("Risque supprimé.");});
 }
 
 /* ----------------------------- Cartographie ----------------------------- */
@@ -2127,7 +2144,7 @@ function saveReco(id){
 }
 function deleteReco(id){
   const r=DB.recommendations.find(x=>x.id===id);
-  confirmModal("Supprimer cette recommandation ?", esc(r.texte||r.ref||""), ()=>{DB.recommendations=DB.recommendations.filter(x=>x.id!==id);save();renderRecos();toast("Supprimée.");});
+  confirmModal("Supprimer cette recommandation ?", esc(r.texte||r.ref||""), ()=>{DB.recommendations=DB.recommendations.filter(x=>x.id!==id);save();refreshAll();toast("Supprimée.");});
 }
 
 /* ----------------------------- RH & équipe ----------------------------- */
