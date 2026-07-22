@@ -272,6 +272,7 @@
     <div class="navitem" data-scr="agenda" onclick="setScreen('agenda')"><span class="ic">📅</span><span class="lbl">Agenda</span></div>
     <div class="navitem" data-scr="budget" onclick="setScreen('budget')"><span class="ic">💶</span><span class="lbl">Budget</span></div>
     <div class="navitem" data-scr="ca" onclick="setScreen('ca')"><span class="ic">📈</span><span class="lbl">Chiffre d'affaires</span></div>
+    <div class="navitem" data-scr="resultat" onclick="setScreen('resultat')"><span class="ic">🧾</span><span class="lbl">Compte de résultat</span></div>
     <div class="navgroup">MÉTHODE R5®</div>
     <div class="navitem" data-scr="missions" onclick="setScreen('missions')"><span class="ic">🎯</span><span class="lbl">Missions</span></div>
     <div class="navitem" data-scr="risks" onclick="setScreen('risks')"><span class="ic">⚠️</span><span class="lbl">Matrice des risques</span></div>
@@ -292,6 +293,7 @@
     <div class="screen" id="scr-agenda"></div>
     <div class="screen" id="scr-budget"></div>
     <div class="screen" id="scr-ca"></div>
+    <div class="screen" id="scr-resultat"></div>
     <div class="screen" id="scr-missions"></div>
     <div class="screen" id="scr-risks"></div>
     <div class="screen" id="scr-carto"></div>
@@ -382,7 +384,8 @@ function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(
 
 function defaultDB(){
   return {
-    meta:{ version:2, defaultCurrency:"MGA", rateEurMga:5000, created:todayISO(), r5SheetId:"" },
+    meta:{ version:2, defaultCurrency:"MGA", rateEurMga:5000, created:todayISO(), r5SheetId:"", taxRate:20, amort:0, financier:0 },
+    recurring:[],
     clients:[], events:[], transactions:[],
     missions:[], risks:[], recommendations:[],
     employees:[], recruitments:[], leaves:[], activities:[], documents:[], playbooks:[], aiMemory:[], aiChat:[],
@@ -454,7 +457,42 @@ function load(){
   DB.missions=DB.missions||[]; DB.risks=DB.risks||[]; DB.recommendations=DB.recommendations||[];
   DB.employees=DB.employees||[]; DB.recruitments=DB.recruitments||[]; DB.leaves=DB.leaves||[]; DB.activities=DB.activities||[]; DB.documents=DB.documents||[];
   DB.playbooks=DB.playbooks||[]; DB.aiMemory=DB.aiMemory||[]; DB.aiChat=DB.aiChat||[];
+  DB.recurring=DB.recurring||[];
+  if(DB.meta.taxRate==null) DB.meta.taxRate=20;
+  if(DB.meta.amort==null) DB.meta.amort=0;
+  if(DB.meta.financier==null) DB.meta.financier=0;
   if(!DB.meta.playbooksSeeded){ DB.playbooks=defaultPlaybooks(); DB.meta.playbooksSeeded=true; save(); }
+  generateRecurring();
+}
+/* ----------------------------- Charges & produits récurrents ----------------------------- */
+// Génère automatiquement les transactions mensuelles manquantes pour chaque récurrent actif.
+function ymKey(dstr){ const p=(dstr||"").split("-"); const y=parseInt(p[0]); const m=parseInt(p[1]); return y? y*12+((m||1)-1) : 0; }
+function generateRecurring(){
+  if(!DB.recurring||!DB.recurring.length) return 0;
+  const now=new Date(), curKey=now.getFullYear()*12+now.getMonth();
+  let created=0;
+  DB.recurring.forEach(rc=>{
+    if(rc.active===false) return;
+    const key=ymKey(rc.startDate||rc.created||todayISO());
+    if(!key) return;
+    const endKey = rc.endDate? ymKey(rc.endDate) : curKey;
+    for(let k=key; k<=Math.min(curKey,endKey); k++){
+      const y=Math.floor(k/12), mo=k%12;
+      const period=y+"-"+String(mo+1).padStart(2,"0");
+      const exists=DB.transactions.some(t=>t.recurringId===rc.id && t.period===period);
+      if(exists) continue;
+      const day=Math.min(rc.day||1, new Date(y,mo+1,0).getDate());
+      const dstr=y+"-"+String(mo+1).padStart(2,"0")+"-"+String(day).padStart(2,"0");
+      const isPast = dstr<=todayISO();
+      DB.transactions.push({ id:uid(), sens:rc.sens||"sortant", label:rc.label, amount:rc.amount,
+        currency:rc.currency||DB.meta.defaultCurrency, method: isPast?(rc.method||""):"", category:rc.category,
+        clientId:rc.clientId||"", recurringId:rc.id, period, date:dstr, dueDate:dstr,
+        status: isPast?"realise":"prevu" });
+      created++;
+    }
+  });
+  if(created){ save(); }
+  return created;
 }
 function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }
 
@@ -476,6 +514,28 @@ function fmtD(amount){ return fmt(amount, DB.meta.defaultCurrency); }
 
 function clientName(id){ const c=DB.clients.find(x=>x.id===id); return c?c.company:"—"; }
 
+/* ----------------------------- Focus client (filtre transversal) ----------------------------- */
+let focusClient=""; // id du client en focus, "" = tous
+function setFocus(id){ focusClient=id||""; refreshAll(); }
+function focusGo(id, screen){ focusClient=id||""; setScreen(screen); }
+function inFocus(clientId){ return !focusClient || clientId===focusClient; }
+function clientLink(id){ const c=DB.clients.find(x=>x.id===id); if(!c) return "—"; return `<a class="clink" onclick="openClientFiche('${id}')" title="Ouvrir la fiche 360°">${esc(c.company)}</a>`; }
+function clientPickerHtml(){
+  return `<select class="chip" style="padding:7px 10px;max-width:230px" onchange="setFocus(this.value)" title="Filtrer cet onglet sur un client">
+    <option value="">👥 Tous les clients</option>
+    ${DB.clients.slice().sort((a,b)=>(a.company||'').localeCompare(b.company||'')).map(c=>`<option value="${c.id}" ${focusClient===c.id?'selected':''}>${esc(c.company)}</option>`).join("")}
+  </select>`;
+}
+function focusBanner(){
+  if(!focusClient) return "";
+  const c=DB.clients.find(x=>x.id===focusClient); if(!c) return "";
+  return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--navy);color:#fff;border-radius:10px;padding:8px 12px;margin-bottom:12px;font-size:13px">
+    <span>📌 Focus client : <b>${esc(c.company)}</b></span>
+    <button class="cta ghost sm" style="background:rgba(255,255,255,.14);color:#fff;border-color:rgba(255,255,255,.3)" onclick="openClientFiche('${c.id}')">Voir sa fiche 360°</button>
+    <button class="cta ghost sm" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.3)" onclick="setFocus('')">✕ Tous les clients</button>
+  </div>`;
+}
+
 /* ----------------------------- Navigation ----------------------------- */
 function setScreen(name){
   document.querySelectorAll(".navitem").forEach(n=>n.classList.toggle("active", n.getAttribute("data-scr")===name));
@@ -485,7 +545,7 @@ function setScreen(name){
 }
 function renderScreen(name){
   ({dashboard:renderDashboard, clients:renderClients, agenda:renderAgenda,
-    budget:renderBudget, ca:renderCA, missions:renderMissions, risks:renderRisks,
+    budget:renderBudget, ca:renderCA, resultat:renderResultat, missions:renderMissions, risks:renderRisks,
     carto:renderCarto, recos:renderRecos, rh:renderRH, audit:renderAudit,
     commercial:renderCommercial, fiches:renderFiches, clientfiche:renderClientFiche, analyses:renderAnalyses}[name]||(()=>{}))();
 }
@@ -714,6 +774,7 @@ function scoreGauge(v,label){
 }
 function openClientFiche(id){
   currentClientId=id;
+  focusClient=id; // le client ouvert devient le client en focus dans tous les onglets
   document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
   document.getElementById("scr-clientfiche").classList.add("active");
   renderClientFiche();
@@ -735,6 +796,19 @@ function renderClientFiche(){
     <div class="pagetitle">
       <div><h1>${esc(c.company)}</h1><div class="sub">${esc(c.sector||'—')} · <span class="badge ${statusBadge(c.status)}">${cap(c.status)}</span>${c.contactName?' · '+esc(c.contactName):''}${c.contactPhone?' · '+esc(c.contactPhone):''}${c.contactEmail?' · '+esc(c.contactEmail):''}</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="cta ghost" onclick="aiClientAdvice('${c.id}')">🤖 Conseil IA</button><button class="cta ghost" onclick="printClientReport('${c.id}')">🖨 Rapport</button><button class="cta ghost" onclick="openClientForm('${c.id}')">✎ Modifier</button></div>
+    </div>
+    <div class="card" style="padding:12px 14px">
+      <div style="font-size:11px;color:var(--muted);letter-spacing:.04em;margin-bottom:8px">ALLER DIRECTEMENT À — filtré sur ce client</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="cta ghost sm" onclick="focusGo('${c.id}','missions')">🎯 Ses missions</button>
+        <button class="cta ghost sm" onclick="focusGo('${c.id}','budget')">💶 Son budget</button>
+        <button class="cta ghost sm" onclick="focusGo('${c.id}','ca')">📈 Son CA</button>
+        <button class="cta ghost sm" onclick="focusGo('${c.id}','risks')">⚠️ Ses risques</button>
+        <button class="cta ghost sm" onclick="focusGo('${c.id}','carto')">🗺️ Sa cartographie</button>
+        <button class="cta ghost sm" onclick="focusGo('${c.id}','recos')">✅ Ses recommandations</button>
+        <button class="cta ghost sm" onclick="focusGo('${c.id}','agenda')">📅 Son agenda</button>
+        <button class="cta sm" onclick="openMissionForm(null,'${c.id}')">＋ Nouvelle mission</button>
+      </div>
     </div>
     <div class="card">
       <h2>Scores R5®</h2>
@@ -876,14 +950,17 @@ function deleteDoc(id){
 let agendaFilter="tous";
 function renderAgenda(){
   if(!calRef){ calRef=new Date(); calRef.setDate(1); }
-  const list=DB.events.filter(e=>agendaFilter==="tous"||e.type===agendaFilter)
+  const list=DB.events.filter(e=>(agendaFilter==="tous"||e.type===agendaFilter)&&inFocus(e.clientId))
     .sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time));
   const upcoming=list.filter(e=>e.date>=todayISO());
   const past=list.filter(e=>e.date<todayISO()).reverse();
   document.getElementById("scr-agenda").innerHTML=`
     <div class="pagetitle"><div><h1>Agenda</h1><div class="sub">Audits, prospections, rendez-vous — datation & suivi</div></div>
       <button class="cta" onclick="openEventForm()">+ Nouvel événement</button></div>
+    ${focusBanner()}
     <div class="filters">
+      ${clientPickerHtml()}
+      <span style="width:14px"></span>
       <button class="chip ${agendaFilter==='tous'?'active':''}" onclick="agendaFilter='tous';renderAgenda()">Tous</button>
       ${Object.keys(EVENT_TYPES).map(t=>`<button class="chip ${agendaFilter===t?'active':''}" onclick="agendaFilter='${t}';renderAgenda()">${EVENT_TYPES[t]}</button>`).join("")}
     </div>
@@ -909,7 +986,7 @@ function eventListHtml(arr){
     <div class="li"><span>
       <span class="badge ${evBadge(e.type)}">${EVENT_TYPES[e.type]}</span>
       <span class="badge ${e.status==='fait'?'b-green':e.status==='annule'?'b-grey':(e.date<todayISO()?'b-orange':'b-blue')}">${e.status==='fait'?'Réalisé':e.status==='annule'?'Annulé':(e.date<todayISO()?'À traiter':'Planifié')}</span>
-      ${esc(e.title)}<br><span style="color:var(--muted);font-size:11.5px">${clientName(e.clientId)}${e.location?" · "+esc(e.location):""}</span>
+      ${esc(e.title)}<br><span style="color:var(--muted);font-size:11.5px">${clientLink(e.clientId)}${e.location?" · "+esc(e.location):""}</span>
     </span>
     <span style="text-align:right;"><span class="d">${frDate(e.date)}${e.time?"<br>"+e.time:""}</span>
       <div class="rowact" style="margin-top:5px;justify-content:flex-end;"><button class="iconbtn" onclick="openEventForm('${e.id}')">✎</button><button class="iconbtn del" onclick="deleteEvent('${e.id}')">🗑</button></div>
@@ -974,10 +1051,12 @@ function renderBudget(){
   let list=DB.transactions.slice();
   if(budgetSens!=="tous") list=list.filter(t=>t.sens===budgetSens);
   if(budgetStatus!=="tous") list=list.filter(t=>t.status===budgetStatus);
+  if(focusClient) list=list.filter(t=>t.clientId===focusClient);
   list.sort((x,y)=>(y.date).localeCompare(x.date));
   document.getElementById("scr-budget").innerHTML=`
     <div class="pagetitle"><div><h1>Budget</h1><div class="sub">Prévisions, entrants, sortants — par mode de paiement</div></div>
       <div style="display:flex;gap:8px"><button class="cta ghost" onclick="openTxForm(null,'sortant')">− Dépense</button><button class="cta" onclick="openTxForm(null,'entrant')">+ Entrée</button></div></div>
+    ${focusBanner()}
     <div class="kpis">
       <div class="kpi"><div class="v good">${fmtD(a.caEffectif)}</div><div class="l">Entrées encaissées ${curYear()}</div></div>
       <div class="kpi"><div class="v">${fmtD(a.enAttente)}</div><div class="l">Entrées prévues (à venir)</div></div>
@@ -985,6 +1064,8 @@ function renderBudget(){
       <div class="kpi"><div class="v ${a.solde<0?'danger':'good'}">${fmtD(a.solde)}</div><div class="l">Solde net</div></div>
     </div>
     <div class="filters">
+      ${clientPickerHtml()}
+      <span style="width:14px"></span>
       ${[["tous","Tous"],["entrant","Entrées"],["sortant","Dépenses"]].map(f=>`<button class="chip ${budgetSens===f[0]?'active':''}" onclick="budgetSens='${f[0]}';renderBudget()">${f[1]}</button>`).join("")}
       <span style="width:14px"></span>
       ${[["tous","Tous statuts"],["prevu","Prévu"],["realise","Réalisé"]].map(f=>`<button class="chip ${budgetStatus===f[0]?'active':''}" onclick="budgetStatus='${f[0]}';renderBudget()">${f[1]}</button>`).join("")}
@@ -993,7 +1074,7 @@ function renderBudget(){
       ${list.length? `<table><thead><tr><th>Libellé</th><th>Client</th><th>Catégorie</th><th>Date</th><th>Paiement</th><th>Statut</th><th style="text-align:right">Montant</th><th></th></tr></thead><tbody>`+
       list.map(t=>{
         const retard = t.sens==="entrant"&&t.status==="prevu"&&(t.dueDate||t.date)<todayISO();
-        return `<tr><td><b>${esc(t.label)}</b></td><td>${clientName(t.clientId)}</td><td>${esc(t.category||"—")}</td>
+        return `<tr><td><b>${esc(t.label)}</b></td><td>${clientLink(t.clientId)}</td><td>${esc(t.category||"—")}</td>
         <td>${frDate(t.date)}${retard?`<br><span class="badge b-red">échéance dépassée</span>`:""}</td>
         <td>${t.method?esc(t.method):"—"}</td>
         <td><span class="badge ${t.status==='realise'?'b-green':'b-orange'}">${t.status==='realise'?(t.sens==='entrant'?'Encaissé':'Payé'):'Prévu'}</span></td>
@@ -1092,15 +1173,21 @@ function renderCA(){
     const v=toDefault(t.amount,t.currency);
     if(t.status==="realise"&&inYear(t.date,y)) byClient[k].eff+=v; else if(t.status==="prevu") byClient[k].prov+=v;
   });
-  const rows=Object.entries(byClient).map(([k,v])=>({name:k==="__none"?"— Sans client —":clientName(k),...v}))
+  let rows=Object.entries(byClient).map(([k,v])=>({id:k,name:k==="__none"?"— Sans client —":clientName(k),...v}))
     .filter(r=>r.eff||r.prov).sort((a,b)=>(b.eff+b.prov)-(a.eff+a.prov));
+  if(focusClient) rows=rows.filter(r=>r.id===focusClient);
+  // KPIs : globaux, ou recentrés sur le client en focus
+  let kEff=a.caEffectif, kProv=a.caProvisoire, kRetard=a.enRetard;
+  if(focusClient){ kEff=0;kProv=0;kRetard=0; DB.transactions.filter(t=>t.sens==="entrant"&&t.clientId===focusClient).forEach(t=>{const v=toDefault(t.amount,t.currency); if(t.status==="realise"&&inYear(t.date,y))kEff+=v; else if(t.status==="prevu"){kProv+=v; if((t.dueDate||t.date)<todayISO())kRetard+=v;}}); }
   document.getElementById("scr-ca").innerHTML=`
     <div class="pagetitle"><div><h1>Chiffre d'affaires</h1><div class="sub">Provisoire (à encaisser) vs effectif (encaissé) — ${y}</div></div></div>
+    ${focusBanner()}
+    <div class="filters">${clientPickerHtml()}</div>
     <div class="kpis">
-      <div class="kpi"><div class="v good">${fmtD(a.caEffectif)}</div><div class="l">CA effectif encaissé</div></div>
-      <div class="kpi"><div class="v">${fmtD(a.caProvisoire)}</div><div class="l">CA provisoire (pipeline)</div></div>
-      <div class="kpi"><div class="v">${fmtD(a.caEffectif+a.caProvisoire)}</div><div class="l">CA potentiel total</div></div>
-      <div class="kpi"><div class="v ${a.enRetard>0?'danger':''}">${fmtD(a.enRetard)}</div><div class="l">Dont en retard d'encaissement</div></div>
+      <div class="kpi"><div class="v good">${fmtD(kEff)}</div><div class="l">CA effectif encaissé</div></div>
+      <div class="kpi"><div class="v">${fmtD(kProv)}</div><div class="l">CA provisoire (pipeline)</div></div>
+      <div class="kpi"><div class="v">${fmtD(kEff+kProv)}</div><div class="l">CA potentiel total</div></div>
+      <div class="kpi"><div class="v ${kRetard>0?'danger':''}">${fmtD(kRetard)}</div><div class="l">Dont en retard d'encaissement</div></div>
     </div>
     <div class="card">
       <h2>CA encaissé (or) vs prévu (beige) — 7 mois</h2>
@@ -1109,7 +1196,7 @@ function renderCA(){
     <div class="card">
       <h2>CA par client</h2>
       ${rows.length? `<table><thead><tr><th>Client</th><th style="text-align:right">Effectif</th><th style="text-align:right">Provisoire</th><th style="text-align:right">Total</th></tr></thead><tbody>`+
-      rows.map(r=>`<tr><td><b>${esc(r.name)}</b></td><td style="text-align:right;color:var(--green)">${r.eff?fmtD(r.eff):"—"}</td>
+      rows.map(r=>`<tr><td><b>${r.id&&r.id!=="__none"?clientLink(r.id):esc(r.name)}</b></td><td style="text-align:right;color:var(--green)">${r.eff?fmtD(r.eff):"—"}</td>
         <td style="text-align:right">${r.prov?fmtD(r.prov):"—"}</td><td style="text-align:right;font-weight:700">${fmtD(r.eff+r.prov)}</td></tr>`).join("")+
       `</tbody></table>` : `<div class="empty">Aucune entrée enregistrée.</div>`}
     </div>`;
@@ -1121,6 +1208,190 @@ function dualBarsHtml(eff, prov){
       <div class="bar" style="height:${Math.round(s.sum/max*100)}%;width:40%" title="Encaissé ${s.label}: ${fmtD(s.sum)}"></div>
       <div class="bar prov" style="height:${Math.round(prov[i].sum/max*100)}%;width:40%" title="Prévu ${s.label}: ${fmtD(prov[i].sum)}"></div>
     </div><div class="bar-lbl">${s.label}</div></div>`).join("")+`</div>`;
+}
+
+/* ----------------------------- Compte de résultat ----------------------------- */
+let pnlYear=0; // 0 = année courante
+function pnlColumn(pred){
+  const inn={}, out={};
+  DB.transactions.forEach(t=>{ if(!pred(t)) return; const v=toDefault(t.amount,t.currency);
+    if(t.sens==="entrant"){ inn[t.category||"Autre"]=(inn[t.category||"Autre"]||0)+v; }
+    else { out[t.category||"Autre"]=(out[t.category||"Autre"]||0)+v; } });
+  const produits=Object.values(inn).reduce((s,x)=>s+x,0);
+  const personnel=out["Salaires"]||0, taxes=out["Charges & taxes"]||0;
+  let chargesExt=0; Object.entries(out).forEach(([k,v])=>{ if(k!=="Salaires"&&k!=="Charges & taxes") chargesExt+=v; });
+  const amort=DB.meta.amort||0, financier=DB.meta.financier||0, taxRate=DB.meta.taxRate!=null?DB.meta.taxRate:20;
+  const ebe=produits-chargesExt-personnel-taxes;
+  const rexp=ebe-amort, rai=rexp+financier;
+  const is=rai>0?Math.round(rai*taxRate/100):0, net=rai-is;
+  return {inn,out,produits,personnel,taxes,chargesExt,amort,ebe,rexp,financier,rai,is,net};
+}
+function pnlLines(yr){
+  const reel=pnlColumn(t=>t.status==="realise" && inYear(t.date,yr));
+  const prev=pnlColumn(t=>(t.status==="realise"&&inYear(t.date,yr))||(t.status==="prevu"&&inYear(t.dueDate||t.date,yr)));
+  const inCats=[...new Set([...Object.keys(reel.inn),...Object.keys(prev.inn)])];
+  const outExt=[...new Set([...Object.keys(reel.out),...Object.keys(prev.out)])].filter(k=>k!=="Salaires"&&k!=="Charges & taxes");
+  const L=[];
+  L.push({h:"PRODUITS D'EXPLOITATION"});
+  inCats.forEach(k=>L.push({label:k, r:reel.inn[k]||0, p:prev.inn[k]||0}));
+  L.push({label:"Total produits d'exploitation", r:reel.produits, p:prev.produits, tot:true});
+  L.push({h:"CHARGES D'EXPLOITATION"});
+  outExt.forEach(k=>L.push({label:k, r:-(reel.out[k]||0), p:-(prev.out[k]||0)}));
+  L.push({label:"Total charges externes", r:-reel.chargesExt, p:-prev.chargesExt, tot:true});
+  L.push({label:"Charges de personnel (salaires)", r:-reel.personnel, p:-prev.personnel});
+  L.push({label:"Impôts & taxes", r:-reel.taxes, p:-prev.taxes});
+  L.push({label:"EXCÉDENT BRUT D'EXPLOITATION (EBE)", r:reel.ebe, p:prev.ebe, big:true});
+  L.push({label:"Dotations aux amortissements", r:-reel.amort, p:-prev.amort});
+  L.push({label:"Résultat d'exploitation", r:reel.rexp, p:prev.rexp, tot:true});
+  L.push({label:"Résultat financier", r:reel.financier, p:prev.financier});
+  L.push({label:"Résultat avant impôt", r:reel.rai, p:prev.rai, tot:true});
+  L.push({label:"Impôt sur les bénéfices ("+(DB.meta.taxRate!=null?DB.meta.taxRate:20)+" %)", r:-reel.is, p:-prev.is});
+  L.push({label:"RÉSULTAT NET (bénéfice net)", r:reel.net, p:prev.net, big:true});
+  return {reel,prev,L};
+}
+function renderResultat(){
+  const yr=pnlYear||curYear();
+  const {reel,prev,L}=pnlLines(yr);
+  const years=[...new Set(DB.transactions.map(t=>(t.date||t.dueDate||"").slice(0,4)).filter(Boolean))];
+  if(!years.includes(String(curYear()))) years.push(String(curYear()));
+  years.sort((a,b)=>b.localeCompare(a));
+  const nRec=DB.recurring.filter(r=>r.active!==false).length;
+  const valCell=(v,x)=>`<td style="text-align:right;${x.big?'font-weight:800;':x.tot?'font-weight:700;':''}${v<0?'color:var(--red)':((x.big||x.tot)&&v>0?'color:var(--green)':'')}">${fmtD(v)}</td>`;
+  const rowsHtml=L.map(x=>{
+    if(x.h) return `<tr style="background:var(--navy);color:#fff"><td style="font-size:11.5px;letter-spacing:.04em;font-weight:700;padding:7px 10px">${x.h}</td><td></td><td></td></tr>`;
+    return `<tr style="${x.big?'background:#eef3f9;':''}"><td style="${x.big?'font-weight:800':x.tot?'font-weight:700':''}">${esc(x.label)}</td>${valCell(x.r,x)}${valCell(x.p,x)}</tr>`;
+  }).join("");
+  document.getElementById("scr-resultat").innerHTML=`
+    <div class="pagetitle"><div><h1>Compte de résultat</h1><div class="sub">Réalisé vs prévisionnel — EBE & bénéfice net — devise ${DB.meta.defaultCurrency==="MGA"?"Ariary":"Euro"}</div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select class="chip" style="padding:7px 10px" onchange="pnlYear=parseInt(this.value)||0;renderResultat()">${years.map(y=>`<option value="${y}" ${String(yr)===y?'selected':''}>Exercice ${y}</option>`).join("")}</select>
+        <button class="cta ghost" onclick="openRecurringManager()">🔁 Récurrents${nRec?` (${nRec})`:""}</button>
+        <button class="cta ghost" onclick="exportResultatCSV()">⬇ Excel / CSV</button>
+        <button class="cta ghost" onclick="printResultat()">🖨 PDF</button>
+      </div></div>
+    <div class="kpis">
+      <div class="kpi"><div class="v ${prev.ebe<0?'danger':'good'}">${fmtD(prev.ebe)}</div><div class="l">EBE prévisionnel ${yr}</div></div>
+      <div class="kpi"><div class="v ${prev.net<0?'danger':'good'}">${fmtD(prev.net)}</div><div class="l">Bénéfice net prévisionnel</div></div>
+      <div class="kpi"><div class="v">${fmtD(reel.ebe)}</div><div class="l">EBE réalisé (à ce jour)</div></div>
+      <div class="kpi"><div class="v ${reel.net<0?'danger':''}">${fmtD(reel.net)}</div><div class="l">Bénéfice net réalisé</div></div>
+    </div>
+    <div class="card">
+      <table><thead><tr><th>Poste</th><th style="text-align:right;width:170px">Réalisé (encaissé/payé)</th><th style="text-align:right;width:170px">Prévisionnel (année)</th></tr></thead>
+      <tbody>${rowsHtml}</tbody></table>
+      <div class="hint" style="margin-top:10px">« Réalisé » = mouvements encaissés/payés. « Prévisionnel » = réalisé + à venir (prévu) sur l'exercice. EBE = Produits − charges externes − personnel − impôts & taxes. Résultat net = après amortissements, financier et impôt (${DB.meta.taxRate!=null?DB.meta.taxRate:20} %).</div>
+    </div>
+    <div class="card">
+      <h2>Ajustements de l'exercice</h2>
+      <div class="filters" style="align-items:flex-end;gap:14px">
+        <div class="field" style="margin:0"><label>Dotations amortissements (annuel)</label><input type="number" id="pnl-amort" value="${DB.meta.amort||0}" style="width:170px"></div>
+        <div class="field" style="margin:0"><label>Résultat financier (+/−)</label><input type="number" id="pnl-fin" value="${DB.meta.financier||0}" style="width:170px"></div>
+        <div class="field" style="margin:0"><label>Taux d'impôt sur les bénéfices (%)</label><input type="number" id="pnl-tax" value="${DB.meta.taxRate!=null?DB.meta.taxRate:20}" style="width:120px"></div>
+        <button class="cta" onclick="savePnlAdj()">Appliquer</button>
+      </div>
+      <div class="hint">Madagascar : impôt sur les revenus (IR) des sociétés à 20 % par défaut — ajustable. Amortissements et résultat financier saisis ici faute de suivi comptable dédié.</div>
+    </div>`;
+}
+function savePnlAdj(){
+  DB.meta.amort=parseFloat(val("pnl-amort"))||0;
+  DB.meta.financier=parseFloat(val("pnl-fin"))||0;
+  const tr=parseFloat(val("pnl-tax")); if(!isNaN(tr)&&tr>=0) DB.meta.taxRate=tr;
+  save(); renderResultat(); toast("Ajustements enregistrés.");
+}
+function downloadCSV(filename, rows){
+  const csv=rows.map(r=>r.map(c=>{ c=(c==null?"":String(c)); return /[";\n]/.test(c)?'"'+c.replace(/"/g,'""')+'"':c; }).join(";")).join("\r\n");
+  const blob=new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8;"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=filename; a.click();
+  toast("Fichier exporté (ouvre dans Excel / Sheets).");
+}
+function exportResultatCSV(){
+  const yr=pnlYear||curYear(); const {L}=pnlLines(yr);
+  const rows=[[ (DB.meta.cabinetName||"BSM Advisory & Consulting")+" — Compte de résultat "+yr ],
+    ["Devise", DB.meta.defaultCurrency],
+    ["Poste","Réalisé","Prévisionnel"]];
+  L.forEach(x=>{ if(x.h) rows.push([x.h]); else rows.push([x.label, Math.round(x.r), Math.round(x.p)]); });
+  downloadCSV("BSM_Compte_de_resultat_"+yr+".csv", rows);
+}
+function printResultat(){
+  const yr=pnlYear||curYear(); const {reel,prev,L}=pnlLines(yr);
+  const cell=(v,x)=>`<td style="text-align:right;${x.big?'font-weight:800':x.tot?'font-weight:700':''}">${fmtD(v)}</td>`;
+  const body=L.map(x=> x.h? `<tr><td colspan="3" style="background:#102A43;color:#fff;font-weight:700">${x.h}</td></tr>`
+    : `<tr style="${x.big?'background:#eef3f9':''}"><td style="${x.big?'font-weight:800':x.tot?'font-weight:700':''}">${esc(x.label)}</td>${cell(x.r,x)}${cell(x.p,x)}</tr>`).join("");
+  document.getElementById("report").innerHTML=`<div class="rep">
+    ${repHeader("Compte de résultat — exercice "+yr,"EBE & bénéfice net · devise "+DB.meta.defaultCurrency)}
+    <table><tr><th>Poste</th><th style="text-align:right">Réalisé</th><th style="text-align:right">Prévisionnel</th></tr>${body}</table>
+    <p class="meta">EBE prévisionnel : ${fmtD(prev.ebe)} · Bénéfice net prévisionnel : ${fmtD(prev.net)} · Réalisé à ce jour : EBE ${fmtD(reel.ebe)}, net ${fmtD(reel.net)}.</p>
+    <p class="meta">Base : « Réalisé » = encaissé/payé ; « Prévisionnel » = réalisé + à venir. Impôt sur les bénéfices ${DB.meta.taxRate!=null?DB.meta.taxRate:20} %.</p>
+  </div>`;
+  window.print();
+}
+/* ---- Gestion des charges & produits récurrents ---- */
+function openRecurringManager(){
+  const list=DB.recurring.slice();
+  openModal(`
+    <span class="close" onclick="closeModal()">✕</span>
+    <h2>Charges & produits récurrents</h2>
+    <div class="msub">Définis une fois — générés automatiquement chaque mois dans le budget. Zéro re-saisie.</div>
+    <div style="margin:6px 0 12px"><button class="cta" onclick="openRecurringForm()">+ Nouveau récurrent</button></div>
+    ${list.length? `<table><thead><tr><th>Libellé</th><th>Type</th><th>Catégorie</th><th style="text-align:right">Montant/mois</th><th>Jour</th><th>Actif</th><th></th></tr></thead><tbody>`+
+      list.map(r=>`<tr><td><b>${esc(r.label)}</b></td><td>${r.sens==="entrant"?"Entrée":"Dépense"}</td><td>${esc(r.category||"—")}</td>
+        <td style="text-align:right;color:${r.sens==='entrant'?'var(--green)':'var(--red)'}">${fmt(r.amount,r.currency)}</td>
+        <td>${r.day||1}</td><td><label style="font-weight:400"><input type="checkbox" ${r.active!==false?'checked':''} onchange="toggleRecurring('${r.id}',this.checked)"></label></td>
+        <td><div class="rowact"><button class="iconbtn" onclick="openRecurringForm('${r.id}')">✎</button><button class="iconbtn del" onclick="deleteRecurring('${r.id}')">🗑</button></div></td></tr>`).join("")+`</tbody></table>`
+      : `<div class="empty">Aucun récurrent. Ajoute salaire, loyer, internet, prestataires…</div>`}
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Fermer</button></div>`);
+}
+function openRecurringForm(id){
+  const r=id?DB.recurring.find(x=>x.id===id):{sens:"sortant",currency:DB.meta.defaultCurrency,category:"Salaires",day:1,active:true,startDate:todayISO().slice(0,7)+"-01"};
+  const cats=r.sens==="entrant"?CAT_IN:CAT_OUT;
+  openModal(`
+    <span class="close" onclick="closeModal()">✕</span>
+    <h2>${id?"Modifier le récurrent":"Nouveau récurrent"}</h2>
+    <div class="field"><label>Type</label>
+      <div class="segmented" style="display:flex;width:100%">
+        <button type="button" id="rc-seg-out" class="${r.sens!=='entrant'?'active':''}" style="flex:1" onclick="rcSwitch('sortant')">Dépense</button>
+        <button type="button" id="rc-seg-in" class="${r.sens==='entrant'?'active':''}" style="flex:1" onclick="rcSwitch('entrant')">Entrée</button>
+      </div><input type="hidden" id="rc-sens" value="${r.sens}"></div>
+    <div class="field"><label>Libellé *</label><input id="rc-label" value="${esc(r.label||'')}" placeholder="Ex : Loyer bureau Ivato / Salaire J. Rakoto"></div>
+    <div class="field row2"><label>Montant mensuel & devise</label>
+      <input type="number" id="rc-amount" value="${r.amount!=null?r.amount:''}">
+      <select id="rc-cur">${["MGA","EUR"].map(c=>`<option value="${c}" ${r.currency===c?'selected':''}>${c==='MGA'?'Ariary':'Euro'}</option>`).join("")}</select></div>
+    <div class="field row2"><label>Catégorie & jour du mois</label>
+      <select id="rc-cat">${cats.map(c=>`<option ${r.category===c?'selected':''}>${c}</option>`).join("")}</select>
+      <input type="number" id="rc-day" min="1" max="28" value="${r.day||1}"></div>
+    <div class="field row2"><label>Début (1er mois) & fin (option)</label>
+      <input type="date" id="rc-start" value="${r.startDate||todayISO()}"><input type="date" id="rc-end" value="${r.endDate||''}"></div>
+    <div class="field"><label>Client lié (option)</label><select id="rc-client"><option value="">— Aucun —</option>${DB.clients.map(c=>`<option value="${c.id}" ${r.clientId===c.id?'selected':''}>${esc(c.company)}</option>`).join("")}</select></div>
+    <div class="hint">À l'enregistrement, les mois passés et le mois courant sont générés immédiatement (les mois passés en « payé/encaissé », le reste en « prévu »). Modifiable ensuite dans le Budget.</div>
+    <div class="modal-actions"><button class="cta ghost" onclick="openRecurringManager()">Annuler</button><button class="cta" onclick="saveRecurring('${id||''}')">Enregistrer</button></div>`);
+}
+function rcSwitch(s){
+  document.getElementById("rc-sens").value=s;
+  document.getElementById("rc-seg-in").classList.toggle("active",s==="entrant");
+  document.getElementById("rc-seg-out").classList.toggle("active",s!=="entrant");
+  const sel=document.getElementById("rc-cat"); sel.innerHTML=(s==="entrant"?CAT_IN:CAT_OUT).map(c=>`<option>${c}</option>`).join("");
+}
+function saveRecurring(id){
+  const label=val("rc-label").trim(); const amount=parseFloat(val("rc-amount"));
+  if(!label){ toast("Le libellé est obligatoire."); return; }
+  if(isNaN(amount)||amount<=0){ toast("Montant invalide."); return; }
+  const obj={ sens:val("rc-sens"), label, amount:Math.round(amount), currency:val("rc-cur"), category:val("rc-cat"),
+    day:Math.max(1,Math.min(28,parseInt(val("rc-day"))||1)), startDate:val("rc-start")||todayISO(), endDate:val("rc-end")||"",
+    clientId:val("rc-client"), active:true };
+  if(id){ Object.assign(DB.recurring.find(x=>x.id===id),obj); }
+  else { obj.id=uid(); obj.created=todayISO(); DB.recurring.push(obj); }
+  generateRecurring(); save(); openRecurringManager(); refreshAll(); toast("Récurrent enregistré — budget mis à jour.");
+}
+function toggleRecurring(id,on){
+  const r=DB.recurring.find(x=>x.id===id); if(!r) return; r.active=on;
+  if(on) generateRecurring(); save(); refreshAll();
+}
+function deleteRecurring(id){
+  const r=DB.recurring.find(x=>x.id===id); if(!r) return;
+  const fut=DB.transactions.filter(t=>t.recurringId===id&&t.status==="prevu").length;
+  confirmModal("Supprimer ce récurrent ?", `« ${esc(r.label)} ». ${fut?`${fut} occurrence(s) à venir (prévues) seront retirées du budget. `:""}L'historique déjà payé/encaissé est conservé.`,
+    ()=>{ DB.recurring=DB.recurring.filter(x=>x.id!==id);
+      DB.transactions=DB.transactions.filter(t=>!(t.recurringId===id&&t.status==="prevu"));
+      save(); openRecurringManager(); refreshAll(); toast("Récurrent supprimé."); });
 }
 
 /* ----------------------------- Analyses & Conseils ----------------------------- */
@@ -1407,14 +1678,17 @@ function r5MiniHtml(phase){
   return `<div class="r5mini">`+R5_PHASES.map((p,idx)=>`<div class="${i>=0&&idx<=i?'on':''}" title="${R5_LABELS[p]}"></div>`).join("")+`</div>`;
 }
 function renderMissions(){
-  const list=DB.missions.slice().sort((a,b)=>(a.ref||"").localeCompare(b.ref||""));
+  let list=DB.missions.slice().sort((a,b)=>(a.ref||"").localeCompare(b.ref||""));
+  if(focusClient) list=list.filter(m=>m.clientId===focusClient);
   document.getElementById("scr-missions").innerHTML=`
     <div class="pagetitle"><div><h1>Missions R5®</h1><div class="sub">Contrats, phases R5, montants & livrables</div></div>
-      <button class="cta" onclick="openMissionForm()">+ Nouvelle mission</button></div>
+      <button class="cta" onclick="openMissionForm(null,focusClient)">+ Nouvelle mission</button></div>
+    ${focusBanner()}
+    <div class="filters">${clientPickerHtml()}</div>
     <div class="card">
       ${list.length? `<table><thead><tr><th>Réf</th><th>Client</th><th>Type</th><th>Phase R5</th><th>Montant HT</th><th>Solde dû</th><th>Livrables</th><th>Statut</th><th></th></tr></thead><tbody>`+
       list.map(m=>{const enc=missionEncaisse(m.id);const solde=(m.montantHT||0)-enc;const nEch=DB.transactions.filter(t=>t.missionId===m.id).length;const docs=[m.nda?"NDA":"",m.contrat?"Contrat":"",m.rapport?"Rapport":""].filter(Boolean).join(" · ")||"—";
-        return `<tr><td><b>${esc(m.ref||"—")}</b></td><td>${clientName(m.clientId)}</td><td>${esc(m.type||"—")}</td>
+        return `<tr><td><b>${esc(m.ref||"—")}</b></td><td>${clientLink(m.clientId)}</td><td>${esc(m.type||"—")}</td>
         <td>${r5MiniHtml(m.phase)}<div style="font-size:10.5px;color:var(--muted);margin-top:3px">${R5_LABELS[m.phase]||esc(m.phase||"")}</div></td>
         <td>${m.montantHT?fmt(m.montantHT,m.currency):"—"}${nEch?`<div style="font-size:10.5px;color:var(--muted);margin-top:2px">${nEch} échéance${nEch>1?"s":""} · encaissé ${fmt(enc,m.currency)}</div>`:""}</td>
         <td style="${solde>0?'color:var(--orange);font-weight:600':(m.montantHT&&solde<=0?'color:var(--green);font-weight:600':'')}">${m.montantHT?fmt(solde,m.currency):"—"}</td>
@@ -1549,23 +1823,25 @@ function deleteMission(id){
 }
 
 /* ----------------------------- Matrice des risques ----------------------------- */
-let riskFC="tous", riskFN="tous";
+let riskFN="tous";
 function renderRisks(){
   let list=DB.risks.slice();
-  if(riskFC!=="tous") list=list.filter(r=>r.clientId===riskFC);
+  if(focusClient) list=list.filter(r=>r.clientId===focusClient);
   if(riskFN!=="tous") list=list.filter(r=>r5Niveau(r.probabilite*r.impact)===riskFN);
   list.sort((a,b)=>(b.probabilite*b.impact)-(a.probabilite*a.impact));
   document.getElementById("scr-risks").innerHTML=`
     <div class="pagetitle"><div><h1>Matrice des risques</h1><div class="sub">Identification, cotation P×I, niveau & traitement</div></div>
       <button class="cta" onclick="openRiskForm()">+ Nouveau risque</button></div>
+    ${focusBanner()}
     <div class="filters">
-      <select class="chip" style="padding:6px 10px" onchange="riskFC=this.value;renderRisks()"><option value="tous">Tous les clients</option>${DB.clients.map(c=>`<option value="${c.id}" ${riskFC===c.id?'selected':''}>${esc(c.company)}</option>`).join("")}</select>
+      ${clientPickerHtml()}
+      <span style="width:14px"></span>
       ${["tous","CRITIQUE","HAUTE","MOYENNE","FAIBLE"].map(n=>`<button class="chip ${riskFN===n?'active':''}" onclick="riskFN='${n}';renderRisks()">${n==='tous'?'Tous niveaux':cap(n.toLowerCase())}</button>`).join("")}
     </div>
     <div class="card">
       ${list.length?`<table><thead><tr><th>Réf</th><th>Client</th><th>Famille / Catégorie</th><th>Description</th><th>P</th><th>I</th><th>Score</th><th>Niveau</th><th>Statut</th><th></th></tr></thead><tbody>`+
       list.map(r=>{const sc=r.probabilite*r.impact;const nv=r5Niveau(sc);return `<tr>
-        <td><b>${esc(r.ref||"—")}</b></td><td>${clientName(r.clientId)}</td>
+        <td><b>${esc(r.ref||"—")}</b></td><td>${clientLink(r.clientId)}</td>
         <td>${esc(r.famille||"—")}<br><span style="color:var(--muted);font-size:11.5px">${esc(r.categorie||"")}</span></td>
         <td style="max-width:240px">${esc(r.description||"—")}</td>
         <td>${r.probabilite}</td><td>${r.impact}</td><td><b>${sc}</b></td>
@@ -1612,7 +1888,6 @@ function deleteRisk(id){
 }
 
 /* ----------------------------- Cartographie ----------------------------- */
-let cartoClient="tous";
 function bandColorR5(score){
   if(score>=15) return "rgba(192,57,43,0.28)";
   if(score>=9) return "rgba(217,119,6,0.26)";
@@ -1621,7 +1896,7 @@ function bandColorR5(score){
 }
 function renderCarto(){
   let risks=DB.risks.slice();
-  if(cartoClient!=="tous") risks=risks.filter(r=>r.clientId===cartoClient);
+  if(focusClient) risks=risks.filter(r=>r.clientId===focusClient);
   let cells="";const yl=["5","4","3","2","1"];
   for(let row=0;row<5;row++){const p=5-row;cells+=`<div class="yl">${yl[row]}</div>`;
     for(let i=1;i<=5;i++){const sc=p*i;const here=risks.filter(r=>r.probabilite===p&&r.impact===i);
@@ -1631,7 +1906,8 @@ function renderCarto(){
   const niv={CRITIQUE:0,HAUTE:0,MOYENNE:0,FAIBLE:0};risks.forEach(r=>{niv[r5Niveau(r.probabilite*r.impact)]++;});
   document.getElementById("scr-carto").innerHTML=`
     <div class="pagetitle"><div><h1>Cartographie des risques</h1><div class="sub">Heatmap Probabilité × Impact — ${risks.length} risque(s)</div></div>
-      <select class="chip" style="padding:7px 10px" onchange="cartoClient=this.value;renderCarto()"><option value="tous">Tous les clients</option>${DB.clients.map(c=>`<option value="${c.id}" ${cartoClient===c.id?'selected':''}>${esc(c.company)}</option>`).join("")}</select></div>
+      ${clientPickerHtml()}</div>
+    ${focusBanner()}
     <div class="grid2 wide">
       <div class="card">
         <div style="font-size:11px;color:var(--muted);margin-bottom:8px">↑ Probabilité &nbsp;·&nbsp; Impact →</div>
@@ -1655,14 +1931,16 @@ function recoPrioBadge(p){return {"Critique":"b-red","Élevée":"b-orange","Mod�
 function renderRecos(){
   let list=DB.recommendations.slice();
   if(recoFilter!=="tous") list=list.filter(r=>r.status===recoFilter);
+  if(focusClient) list=list.filter(r=>r.clientId===focusClient);
   list.sort((a,b)=>(a.ref||"").localeCompare(b.ref||""));
   document.getElementById("scr-recos").innerHTML=`
     <div class="pagetitle"><div><h1>Recommandations & suivi</h1><div class="sub">Plan d'action R5 (Respond → Strengthen)</div></div>
       <button class="cta" onclick="openRecoForm()">+ Nouvelle recommandation</button></div>
-    <div class="filters">${[["tous","Toutes"],["a_faire","À faire"],["en_cours","En cours"],["fait","Fait"]].map(f=>`<button class="chip ${recoFilter===f[0]?'active':''}" onclick="recoFilter='${f[0]}';renderRecos()">${f[1]}</button>`).join("")}</div>
+    ${focusBanner()}
+    <div class="filters">${clientPickerHtml()}<span style="width:14px"></span>${[["tous","Toutes"],["a_faire","À faire"],["en_cours","En cours"],["fait","Fait"]].map(f=>`<button class="chip ${recoFilter===f[0]?'active':''}" onclick="recoFilter='${f[0]}';renderRecos()">${f[1]}</button>`).join("")}</div>
     <div class="card">
       ${list.length?`<table><thead><tr><th>Réf</th><th>Client</th><th>Recommandation</th><th>Horizon</th><th>Priorité</th><th>Resp.</th><th>Avancement</th><th>Cible</th><th></th></tr></thead><tbody>`+
-      list.map(r=>`<tr><td><b>${esc(r.ref||"—")}</b></td><td>${clientName(r.clientId)}</td>
+      list.map(r=>`<tr><td><b>${esc(r.ref||"—")}</b></td><td>${clientLink(r.clientId)}</td>
         <td style="max-width:260px">${esc(r.texte||"—")}</td><td style="font-size:11.5px">${esc(r.horizon||"—")}</td>
         <td><span class="badge ${recoPrioBadge(r.priorite)}">${esc(r.priorite||"—")}</span></td><td>${esc(r.responsable||"—")}</td>
         <td><div class="progress"><i style="width:${r.avancement||0}%"></i></div> <span style="font-size:11px">${r.avancement||0}%</span></td>
