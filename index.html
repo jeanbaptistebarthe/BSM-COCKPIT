@@ -254,6 +254,7 @@
     <button class="tb-btn" onclick="openImport()" title="Importer depuis le Sheet R5 / CSV">⇊ Importer R5</button>
     <button class="tb-btn" id="theme-btn" onclick="toggleTheme()" title="Thème clair / sombre">🌙</button>
     <button class="tb-btn" onclick="lockPortal()" title="Verrouiller le cockpit">🔒</button>
+    <span id="server-status" class="tb-btn" style="display:none;align-items:center;gap:4px" title="État de la connexion au serveur BSM"></span>
     <span id="currency-indicator" class="tb-btn" onclick="openSettings()" title="Devise & paramètres">Ar / €</span>
     <button class="tb-btn" onclick="exportData()">⬇ Sauvegarde</button>
     <button class="tb-btn" onclick="document.getElementById('import-file').click()">⬆ Restaurer</button>
@@ -476,7 +477,98 @@ function syncEmployeeSalary(emp){
   } else if(existing){ existing.active=false; }
   generateRecurring();
 }
-function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }
+function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); serverPush(); }
+
+/* ----------------------------- Synchronisation serveur local (Bloc 2A) ----------------------------- */
+/* L'app marche toujours en local (localStorage). Si un serveur BSM local est présent
+   (app ouverte via http://…:3000), les données sont partagées + sauvegardées automatiquement.
+   Sinon, repli transparent sur le stockage local du navigateur. */
+let serverEnabled=false, _pushTimer=null;
+function setServerStatus(on){
+  serverEnabled=on;
+  const el=document.getElementById("server-status");
+  if(el){ el.style.display="inline-flex"; el.textContent=on?"🟢 Serveur":"🔴 Hors ligne";
+    el.title=on?"Connecté au serveur BSM — données partagées entre les postes et sauvegardées automatiquement."
+               :"Serveur BSM injoignable — données enregistrées localement sur ce navigateur."; }
+}
+function serverPush(){
+  if(!serverEnabled) return;                 // pas de serveur détecté → on ne tente rien (site public / fichier local)
+  if(_pushTimer) clearTimeout(_pushTimer);
+  _pushTimer=setTimeout(()=>{
+    fetch("/api/data",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(DB)})
+      .then(r=>setServerStatus(r.ok)).catch(()=>setServerStatus(false));
+  },1200);
+}
+async function serverSyncInit(){
+  try{
+    const r=await fetch("/api/status",{cache:"no-store"}); if(!r.ok) throw 0;
+    const st=await r.json(); if(!st.ok) throw 0;
+    serverEnabled=true; setServerStatus(true);
+    if(st.hasData){
+      const data=await (await fetch("/api/data",{cache:"no-store"})).json();
+      if(data && typeof data==="object" && Array.isArray(data.clients)){
+        localStorage.setItem(STORE_KEY, JSON.stringify(data)); load(); refreshAll();
+      }
+    } else {
+      serverPush();                          // 1er démarrage : on envoie les données locales actuelles au serveur
+    }
+  }catch(e){ /* pas de serveur : on reste en local, sans afficher d'erreur */ }
+}
+
+/* ----------------------------- Intégrations Google (via serveur local + Apps Script) ----------------------------- */
+async function googleCall(action, payload){
+  const r=await fetch("/api/google",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,payload:payload||{}})});
+  let data; try{ data=await r.json(); }catch(e){ throw new Error("Serveur local requis (ouvrez le Cockpit via http://…:3000)."); }
+  if(!data.ok) throw new Error(data.error||"Erreur du pont Google");
+  return data;
+}
+async function googleTest(){
+  const el=document.getElementById("gtest"); if(el) el.textContent="⏳ Test en cours…";
+  try{ const d=await googleCall("ping"); if(el) el.textContent="✅ Pont Google connecté ("+(d.time||"")+")"; }
+  catch(e){ if(el) el.textContent="❌ "+e.message; }
+}
+/* --- Export Cockpit → Google Sheet R5 (écrit dans des onglets COCKPIT_*) --- */
+function rowsClients(){ return [["Société","Secteur","Statut","Contact","Email","Téléphone","Signé le"]].concat(
+  DB.clients.map(c=>[c.company||"",c.sector||"",c.status||"",c.contactName||"",c.contactEmail||"",c.contactPhone||"",c.signatureDate||""])); }
+function rowsRisks(){ return [["Réf","Client","Famille","Catégorie","Description","P","I","Score","Niveau","Statut","Responsable"]].concat(
+  DB.risks.map(r=>{const s=(r.probabilite||0)*(r.impact||0);return [r.ref||"",clientName(r.clientId),r.famille||"",r.categorie||"",r.description||"",r.probabilite||"",r.impact||"",s||"",r5Niveau(s),r.status||"",r.responsable||""];})); }
+function rowsRecos(){ return [["Réf","Client","Recommandation","Priorité","Horizon","Responsable","Avancement %","Statut"]].concat(
+  DB.recommendations.map(r=>[r.ref||"",clientName(r.clientId),r.texte||"",r.priorite||"",r.horizon||"",r.responsable||"",r.avancement||0,r.status||""])); }
+function rowsMissions(){ return [["Réf","Client","Type","Phase","Montant HT","Devise","Statut"]].concat(
+  DB.missions.map(m=>[m.ref||"",clientName(m.clientId),m.type||"",m.phase||"",m.montantHT||0,m.currency||"",m.status||""])); }
+async function pushR5ToSheet(){
+  const el=document.getElementById("gtest"); if(el) el.textContent="⏳ Envoi vers le Sheet R5…";
+  try{ const d=await googleCall("pushR5",{clients:rowsClients(),risks:rowsRisks(),recos:rowsRecos(),missions:rowsMissions()});
+    const w=d.written||{}; if(el) el.textContent=`✅ Sheet R5 mis à jour : ${(w.clients||0)} clients, ${(w.risks||0)} risques, ${(w.recos||0)} recos, ${(w.missions||0)} missions.`;
+    toast("Sheet R5 mis à jour ✅"); }
+  catch(e){ if(el) el.textContent="❌ "+e.message; toast("Échec : "+e.message); }
+}
+/* --- Agenda Cockpit → Google Agenda --- */
+async function sendEventToCalendar(id){
+  const e=DB.events.find(x=>x.id===id); if(!e) return;
+  try{ const start=e.date+(e.time?("T"+e.time+":00"):"T09:00:00");
+    await googleCall("calendar",{title:e.title,start,description:(e.notes||"")+(e.clientId?(" — "+clientName(e.clientId)):""),location:e.location||"",remindMinutes:60});
+    e.gcalSent=todayISO(); save(); toast("Ajouté à Google Agenda ✅ (rappel 1h avant sur votre téléphone)"); renderAgenda(); }
+  catch(err){ toast("Échec : "+err.message); }
+}
+/* --- Point CA mensuel par e-mail --- */
+async function sendCAByEmail(){
+  const to=(DB.meta.reportEmail||"").trim();
+  if(!to){ toast("Renseignez d'abord l'e-mail des rapports (⚙ Paramètres → Intégrations Google)."); return; }
+  const a=agg(); const y=curYear();
+  const html=`<h2>BSM — Point chiffre d'affaires (${y})</h2>
+    <ul>
+      <li><b>CA encaissé</b> : ${fmtD(a.caEffectif)}</li>
+      <li><b>CA à encaisser (pipeline)</b> : ${fmtD(a.caProvisoire)}</li>
+      <li><b>Dépenses payées</b> : ${fmtD(a.chargesPayees)}</li>
+      <li><b>Solde net</b> : ${fmtD(a.solde)}</li>
+      <li><b>Encaissements en retard</b> : ${fmtD(a.enRetard)}</li>
+    </ul>
+    <p>Clients actifs : ${DB.clients.filter(c=>c.status==="actif").length} · Missions en cours : ${DB.missions.filter(m=>m.status==="en_cours").length}</p>
+    <p style="color:#888;font-size:12px">Généré automatiquement par le Cockpit BSM le ${frDate(todayISO())}.</p>`;
+  try{ await googleCall("mail",{to,subject:"BSM — Point CA "+frDate(todayISO()),html}); toast("Point CA envoyé à "+to+" ✅"); }
+  catch(e){ toast("Échec : "+e.message); }
+}
 
 /* ----------------------------- Devise ----------------------------- */
 function toDefault(amount, cur){
@@ -1135,7 +1227,7 @@ function eventListHtml(arr){
       ${esc(e.title)}<br><span style="color:var(--muted);font-size:11.5px">${clientLink(e.clientId)}${e.location?" · "+esc(e.location):""}</span>
     </span>
     <span style="text-align:right;"><span class="d">${frDate(e.date)}${e.time?"<br>"+e.time:""}</span>
-      <div class="rowact" style="margin-top:5px;justify-content:flex-end;"><button class="iconbtn" onclick="openEventForm('${e.id}')">✎</button><button class="iconbtn del" onclick="deleteEvent('${e.id}')">🗑</button></div>
+      <div class="rowact" style="margin-top:5px;justify-content:flex-end;"><button class="iconbtn" title="${e.gcalSent?'Déjà envoyé à Google Agenda le '+frDate(e.gcalSent):'Envoyer à Google Agenda'}" onclick="sendEventToCalendar('${e.id}')">${e.gcalSent?'📅✓':'📅→'}</button><button class="iconbtn" onclick="openEventForm('${e.id}')">✎</button><button class="iconbtn del" onclick="deleteEvent('${e.id}')">🗑</button></div>
     </span></div>`).join("")+`</div>`;
 }
 function calMove(n){ calRef.setMonth(calRef.getMonth()+n); renderAgenda(); }
@@ -1758,6 +1850,15 @@ function openSettings(){
       ${[["mistral-small-latest","Mistral Small (rapide / éco)"],["mistral-medium-latest","Mistral Medium"],["mistral-large-latest","Mistral Large (recommandé)"]].map(m=>`<option value="${m[0]}" ${(DB.meta.aiModel||'mistral-large-latest')===m[0]?'selected':''}>${m[1]}</option>`).join("")}</select></div>
     <div class="hint">Clé stockée localement, jamais publiée. Active l'assistant IA (onglet Analyses & fiches client). Les données envoyées à Mistral servent uniquement à générer les conseils.</div>
     <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+    <div class="field"><label>Intégrations Google (Sheet R5 · Agenda · e-mail)</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button type="button" class="cta ghost sm" onclick="googleTest()">🔌 Tester la connexion</button>
+        <button type="button" class="cta ghost sm" onclick="pushR5ToSheet()">⇈ Exporter Cockpit → Sheet R5</button>
+        <button type="button" class="cta ghost sm" onclick="sendCAByEmail()">✉️ Envoyer le point CA</button>
+      </div>
+      <div class="hint" id="gtest" style="margin-top:6px">Nécessite le serveur local + le pont Google configuré (voir INTEGRATION_GOOGLE.md).</div></div>
+    <div class="field"><label>E-mail pour les rapports (point CA, alertes)</label><input id="s-reportmail" value="${esc(DB.meta.reportEmail||'')}" placeholder="votre adresse e-mail"></div>
+    <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
     <div class="field"><label>Sauvegarde</label>
       <div style="display:flex;gap:8px"><button class="cta ghost sm" onclick="exportData()">⬇ Exporter un fichier</button>
       <button class="cta ghost sm" onclick="document.getElementById('import-file').click()">⬆ Restaurer un fichier</button></div>
@@ -1772,6 +1873,7 @@ function saveSettings(){
   DB.meta.accessCode=val("s-code");
   DB.meta.cabinetName=val("s-cabinet");
   DB.meta.mistralKey=val("s-mistral"); DB.meta.aiModel=val("s-aimodel");
+  DB.meta.reportEmail=val("s-reportmail").trim();
   save(); applyBranding(); closeModal(); document.getElementById("currency-indicator").textContent=DB.meta.defaultCurrency==="MGA"?"Ar / €":"€ / Ar";
   refreshAll(); toast("Paramètres enregistrés.");
 }
@@ -2959,6 +3061,7 @@ applyTheme();
 renderDashboard();
 updateAdviceBadge();
 window.addEventListener("message", onSimulatorMessage); // réception des devis du simulateur (iframe)
+serverSyncInit(); // détecte le serveur local BSM (si l'app est ouverte via http://…) et synchronise
 if(portalNeeded()) showPortal();
 </script>
 <script>if('serviceWorker' in navigator && location.protocol.startsWith('http')){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
