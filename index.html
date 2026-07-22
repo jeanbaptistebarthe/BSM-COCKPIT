@@ -221,7 +221,28 @@
   body.dark .cal .day.out{background:#111a26;color:#3a4757;}
   body.dark .infobox{background:#14212f;border-color:#273241;color:#cdd6e2;}
   body.dark .modcard.sel,body.dark .imp-mode.sel{background:#1c2836;}
-  @media(max-width:820px){.kpis{grid-template-columns:repeat(2,1fr);}.grid2,.grid2.wide{grid-template-columns:1fr;}.sidebar{width:60px;}.sidebar .logo,.sidebar .who,.navgroup,.navitem span.lbl{display:none;}.navitem{justify-content:center;}.imp-modes{grid-template-columns:1fr;}.gauges{grid-template-columns:repeat(2,1fr);}.grid3{grid-template-columns:1fr;}}
+  .ai-fab{position:fixed;bottom:22px;right:22px;width:56px;height:56px;border-radius:50%;background:var(--navy);color:#fff;border:2px solid var(--gold);font-size:24px;cursor:pointer;box-shadow:0 6px 20px rgba(16,42,67,.35);z-index:90;}
+  .ai-fab:hover{background:var(--navy-light);}
+  .ai-drawer{position:fixed;top:0;right:0;width:400px;max-width:96vw;height:100vh;background:var(--cream);border-left:1px solid var(--line);box-shadow:-8px 0 30px rgba(0,0,0,.14);transform:translateX(105%);transition:transform .25s;z-index:400;display:flex;flex-direction:column;}
+  .ai-drawer.open{transform:translateX(0);}
+  .ai-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:var(--navy);color:#fff;flex-shrink:0;}
+  .ai-head b{font-size:15px;} .ai-sub{font-size:11px;color:rgba(255,255,255,.6);margin-top:2px;}
+  .ai-head .iconbtn{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.2);color:#fff;}
+  .ai-head .iconbtn:hover{background:rgba(255,255,255,.22);}
+  .ai-mem{padding:12px 14px;background:#FCF9F2;border-bottom:1px solid var(--line);max-height:38vh;overflow-y:auto;flex-shrink:0;}
+  .ai-mem-item{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--line);}
+  .ai-msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;}
+  .ai-empty{color:var(--muted);font-size:13px;text-align:center;margin:auto;padding:20px;line-height:1.55;}
+  .ai-msg{max-width:86%;padding:9px 12px;border-radius:12px;font-size:13px;line-height:1.5;}
+  .ai-msg.user{align-self:flex-end;background:var(--navy);color:#fff;border-bottom-right-radius:3px;}
+  .ai-msg.bot{align-self:flex-start;background:#fff;border:1px solid var(--line);border-bottom-left-radius:3px;color:var(--ink);}
+  .ai-remember{display:block;margin-top:6px;background:none;border:none;color:var(--gold);font-size:11px;cursor:pointer;padding:0;font-weight:600;}
+  .ai-input{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line);background:var(--cream);flex-shrink:0;}
+  .ai-input textarea{flex:1;resize:none;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit;max-height:120px;}
+  .ai-input .cta{padding:0 16px;}
+  body.dark .ai-drawer,body.dark .ai-input,body.dark .ai-input textarea{background:#16202e;color:var(--ink);border-color:#273241;}
+  body.dark .ai-msg.bot{background:#1b2736;border-color:#273241;} body.dark .ai-mem{background:#14212f;}
+  @media(max-width:820px){.kpis{grid-template-columns:repeat(2,1fr);}.grid2,.grid2.wide{grid-template-columns:1fr;}.sidebar{width:60px;}.sidebar .logo,.sidebar .who,.navgroup,.navitem span.lbl{display:none;}.navitem{justify-content:center;}.imp-modes{grid-template-columns:1fr;}.gauges{grid-template-columns:repeat(2,1fr);}.grid3{grid-template-columns:1fr;}.ai-drawer{width:100vw;}}
 </style>
 </head>
 <body>
@@ -297,6 +318,24 @@
   </div>
 </div>
 
+<button id="ai-fab" class="ai-fab" onclick="openAiChat()" title="Assistant IA">🤖</button>
+<div class="ai-drawer" id="ai-drawer">
+  <div class="ai-head">
+    <div><b>🤖 Assistant BSM</b><div class="ai-sub">Conversation · mémoire · accès à tes données</div></div>
+    <div style="display:flex;gap:6px">
+      <button class="iconbtn" onclick="toggleAiMemory()" title="Mémoire de l'assistant">🧠</button>
+      <button class="iconbtn" onclick="clearAiChat()" title="Nouvelle conversation">🗑</button>
+      <button class="iconbtn" onclick="closeAiChat()" title="Fermer">✕</button>
+    </div>
+  </div>
+  <div id="ai-mem-panel" class="ai-mem" style="display:none"></div>
+  <div id="ai-msgs" class="ai-msgs"></div>
+  <div class="ai-input">
+    <textarea id="ai-chat-input" rows="1" placeholder="Écris ton message… (Entrée pour envoyer)" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAiChat();}"></textarea>
+    <button class="cta" onclick="sendAiChat()">➤</button>
+  </div>
+</div>
+
 <div class="overlay" id="overlay" onclick="if(event.target===this)closeModal()">
   <div class="modal" id="modal-content"></div>
 </div>
@@ -346,7 +385,7 @@ function defaultDB(){
     meta:{ version:2, defaultCurrency:"MGA", rateEurMga:5000, created:todayISO(), r5SheetId:"" },
     clients:[], events:[], transactions:[],
     missions:[], risks:[], recommendations:[],
-    employees:[], recruitments:[], leaves:[], activities:[], documents:[], playbooks:[],
+    employees:[], recruitments:[], leaves:[], activities:[], documents:[], playbooks:[], aiMemory:[], aiChat:[],
     advice:{ dismissed:[], edits:{}, custom:[] }
   };
 }
@@ -414,7 +453,7 @@ function load(){
   DB.clients = DB.clients||[]; DB.events=DB.events||[]; DB.transactions=DB.transactions||[];
   DB.missions=DB.missions||[]; DB.risks=DB.risks||[]; DB.recommendations=DB.recommendations||[];
   DB.employees=DB.employees||[]; DB.recruitments=DB.recruitments||[]; DB.leaves=DB.leaves||[]; DB.activities=DB.activities||[]; DB.documents=DB.documents||[];
-  DB.playbooks=DB.playbooks||[];
+  DB.playbooks=DB.playbooks||[]; DB.aiMemory=DB.aiMemory||[]; DB.aiChat=DB.aiChat||[];
   if(!DB.meta.playbooksSeeded){ DB.playbooks=defaultPlaybooks(); DB.meta.playbooksSeeded=true; save(); }
 }
 function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); }
@@ -613,7 +652,12 @@ function openClientForm(id){
     <div class="field"><label>NDA</label>
       <label style="font-weight:400;font-size:13px"><input type="checkbox" id="f-cnda" ${c.ndaSigned?'checked':''}> NDA signé</label>
       &nbsp;&nbsp;le <input type="date" id="f-cndadate" value="${c.ndaDate||''}" style="width:auto;display:inline-block"></div>
-    <div class="field"><label>Informations contrat (référence, montant, échéance…)</label><input id="f-cinfo" value="${esc(c.contractInfo||'')}"></div>
+    <div class="field"><label>Informations contrat (référence, remarques…)</label><input id="f-cinfo" value="${esc(c.contractInfo||'')}"></div>
+    <div class="field"><label>Montant & facturation</label>
+      ${id?`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <button type="button" class="cta" style="padding:7px 12px;font-size:12.5px" onclick="openClientMission('${id}')">➕ Créer la mission & l'échéancier</button>
+        <span style="font-size:12px;color:var(--muted)">${DB.missions.filter(mm=>mm.clientId===id).length} mission(s) liée(s) — le montant et les entrées d'argent se saisissent <b>une seule fois</b> ici.</span></div>`
+      :`<div class="hint">Enregistrez d'abord le client, puis créez la mission liée : le montant et l'échéancier alimenteront automatiquement le Budget & le CA (aucune re-saisie).</div>`}</div>
     <div class="field"><label>Résumé de mission</label><textarea id="f-msum" rows="2">${esc(c.missionSummary||'')}</textarea></div>
     <div class="field"><label>Résumé de suivi</label><textarea id="f-fsum" rows="2">${esc(c.followupSummary||'')}</textarea></div>
     <div class="field"><label>Notes</label><textarea id="f-notes" rows="2">${esc(c.notes||'')}</textarea></div>
@@ -630,6 +674,7 @@ function saveClient(id){
   else { obj.id=uid(); obj.createdAt=todayISO(); DB.clients.push(obj); }
   save(); closeModal(); refreshAll(); toast("Client enregistré.");
 }
+function openClientMission(clientId){ closeModal(); setScreen("missions"); openMissionForm(null, clientId); }
 function deleteClient(id){
   const c=DB.clients.find(x=>x.id===id);
   const linked=DB.events.filter(e=>e.clientId===id).length + DB.transactions.filter(t=>t.clientId===id).length;
@@ -1368,19 +1413,19 @@ function renderMissions(){
       <button class="cta" onclick="openMissionForm()">+ Nouvelle mission</button></div>
     <div class="card">
       ${list.length? `<table><thead><tr><th>Réf</th><th>Client</th><th>Type</th><th>Phase R5</th><th>Montant HT</th><th>Solde dû</th><th>Livrables</th><th>Statut</th><th></th></tr></thead><tbody>`+
-      list.map(m=>{const solde=(m.montantHT||0)-(m.acompte||0);const docs=[m.nda?"NDA":"",m.contrat?"Contrat":"",m.rapport?"Rapport":""].filter(Boolean).join(" · ")||"—";
+      list.map(m=>{const enc=missionEncaisse(m.id);const solde=(m.montantHT||0)-enc;const nEch=DB.transactions.filter(t=>t.missionId===m.id).length;const docs=[m.nda?"NDA":"",m.contrat?"Contrat":"",m.rapport?"Rapport":""].filter(Boolean).join(" · ")||"—";
         return `<tr><td><b>${esc(m.ref||"—")}</b></td><td>${clientName(m.clientId)}</td><td>${esc(m.type||"—")}</td>
         <td>${r5MiniHtml(m.phase)}<div style="font-size:10.5px;color:var(--muted);margin-top:3px">${R5_LABELS[m.phase]||esc(m.phase||"")}</div></td>
-        <td>${m.montantHT?fmt(m.montantHT,m.currency):"—"}</td>
-        <td style="${solde>0?'color:var(--orange);font-weight:600':''}">${m.montantHT?fmt(solde,m.currency):"—"}</td>
+        <td>${m.montantHT?fmt(m.montantHT,m.currency):"—"}${nEch?`<div style="font-size:10.5px;color:var(--muted);margin-top:2px">${nEch} échéance${nEch>1?"s":""} · encaissé ${fmt(enc,m.currency)}</div>`:""}</td>
+        <td style="${solde>0?'color:var(--orange);font-weight:600':(m.montantHT&&solde<=0?'color:var(--green);font-weight:600':'')}">${m.montantHT?fmt(solde,m.currency):"—"}</td>
         <td style="font-size:11.5px">${docs}</td>
         <td><span class="badge ${m.status==='termine'?'b-green':m.status==='suspendue'?'b-grey':'b-blue'}">${m.status==='termine'?'Terminée':m.status==='suspendue'?'Suspendue':'En cours'}</span></td>
         <td><div class="rowact"><button class="iconbtn" onclick="openMissionForm('${m.id}')">✎</button><button class="iconbtn del" onclick="deleteMission('${m.id}')">🗑</button></div></td></tr>`;}).join("")+`</tbody></table>`
       : `<div class="empty">Aucune mission. Cliquez « + Nouvelle mission » ou importez depuis le Sheet R5.</div>`}
     </div>`;
 }
-function openMissionForm(id){
-  const m=id?DB.missions.find(x=>x.id===id):{phase:"REVEAL",status:"en_cours",currency:DB.meta.defaultCurrency,nda:false,contrat:false,rapport:false,startDate:todayISO()};
+function openMissionForm(id, prefillClientId){
+  const m=id?DB.missions.find(x=>x.id===id):{phase:"REVEAL",status:"en_cours",currency:DB.meta.defaultCurrency,nda:false,contrat:false,rapport:false,startDate:todayISO(),clientId:prefillClientId||""};
   openModal(`
     <span class="close" onclick="closeModal()">✕</span>
     <h2>${id?"Modifier la mission":"Nouvelle mission"}</h2>
@@ -1393,8 +1438,17 @@ function openMissionForm(id){
     <div class="field row2"><label>Dates début / fin prévue</label>
       <input type="date" id="f-mstart" value="${m.startDate||''}"><input type="date" id="f-mend" value="${m.endDate||''}"></div>
     <div class="field row2"><label>Montant HT & devise</label>
-      <input type="number" id="f-mmontant" value="${m.montantHT!=null?m.montantHT:''}"><select id="f-mcur">${["MGA","EUR"].map(c=>`<option value="${c}" ${m.currency===c?'selected':''}>${c==='MGA'?'Ariary':'Euro'}</option>`).join("")}</select></div>
-    <div class="field"><label>Acompte reçu</label><input type="number" id="f-macompte" value="${m.acompte!=null?m.acompte:''}"></div>
+      <input type="number" id="f-mmontant" value="${m.montantHT!=null?m.montantHT:''}" oninput="echRecalcAll()"><select id="f-mcur" onchange="echRenderHint()">${["MGA","EUR"].map(c=>`<option value="${c}" ${m.currency===c?'selected':''}>${c==='MGA'?'Ariary':'Euro'}</option>`).join("")}</select></div>
+    <div class="field"><label>Échéancier de facturation <span style="font-weight:400;color:var(--muted);font-size:11.5px">— alimente automatiquement le Budget & le CA</span></label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:7px">
+        <button type="button" class="chip" onclick="echPreset('full')">Tout en 1 fois</button>
+        <button type="button" class="chip" onclick="echPreset('30-70')">Acompte 30% + Solde 70%</button>
+        <button type="button" class="chip" onclick="echPreset('50-50')">50% / 50%</button>
+        <button type="button" class="chip" onclick="echPreset('3')">3× égales</button>
+      </div>
+      <div id="ech-rows"></div>
+      <button type="button" class="cta ghost" style="margin-top:4px;padding:5px 10px;font-size:12.5px" onclick="echAddRow()">+ Ajouter une échéance</button>
+      <div class="hint" id="ech-hint" style="margin-top:6px"></div></div>
     <div class="field"><label>Livrables</label>
       <label style="display:inline;font-weight:400"><input type="checkbox" id="f-nda" ${m.nda?'checked':''}> NDA</label>
       <label style="display:inline;font-weight:400;margin-left:14px"><input type="checkbox" id="f-contrat" ${m.contrat?'checked':''}> Contrat</label>
@@ -1402,19 +1456,96 @@ function openMissionForm(id){
     <div class="field"><label>Statut</label><select id="f-mstatus">${[["en_cours","En cours"],["termine","Terminée"],["suspendue","Suspendue"]].map(s=>`<option value="${s[0]}" ${m.status===s[0]?'selected':''}>${s[1]}</option>`).join("")}</select></div>
     <div class="field"><label>Notes</label><textarea id="f-mnotes" rows="2">${esc(m.notes||'')}</textarea></div>
     <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="saveMission('${id||''}')">Enregistrer</button></div>`);
+  echInit(m);
+}
+/* ---- Échéancier de facturation : génère & synchronise les transactions liées à une mission ---- */
+function echRows(){ return document.getElementById("ech-rows"); }
+function echMontantHT(){ return parseFloat(val("f-mmontant"))||0; }
+function echRowHtml(d){
+  d=d||{};
+  return `<div class="ech-row" data-txid="${d.txId||''}" style="display:grid;grid-template-columns:1.3fr 50px 1fr 128px 104px 26px;gap:5px;align-items:center;margin-bottom:5px">
+    <input class="ech-label" placeholder="Libellé" value="${esc(d.label||'')}">
+    <input class="ech-pct" type="number" placeholder="%" value="${d.pct!=null?d.pct:''}" oninput="echPctChange(this)" title="% du montant HT">
+    <input class="ech-amt" type="number" placeholder="Montant" value="${d.amount!=null?d.amount:''}" oninput="echClearPct(this)">
+    <input class="ech-due" type="date" value="${d.dueDate||''}" title="Échéance">
+    <select class="ech-status"><option value="prevu" ${d.status!=="realise"?"selected":""}>À encaisser</option><option value="realise" ${d.status==="realise"?"selected":""}>Encaissé</option></select>
+    <button type="button" class="iconbtn del" onclick="echDelRow(this)">🗑</button></div>`;
+}
+function echAddRow(d){ echRows().insertAdjacentHTML("beforeend", echRowHtml(d)); echRenderHint(); }
+function echDelRow(btn){ btn.closest(".ech-row").remove(); echRenderHint(); }
+function echPctChange(inp){ const row=inp.closest(".ech-row"); const pct=parseFloat(inp.value); if(!isNaN(pct)) row.querySelector(".ech-amt").value=Math.round(echMontantHT()*pct/100); echRenderHint(); }
+function echClearPct(inp){ inp.closest(".ech-row").querySelector(".ech-pct").value=""; echRenderHint(); }
+function echRecalcAll(){ echRows().querySelectorAll(".ech-row").forEach(row=>{ const pct=parseFloat(row.querySelector(".ech-pct").value); if(!isNaN(pct)) row.querySelector(".ech-amt").value=Math.round(echMontantHT()*pct/100); }); echRenderHint(); }
+function echPreset(kind){
+  const ht=echMontantHT(), start=val("f-mstart")||todayISO(), end=val("f-mend")||start;
+  echRows().innerHTML="";
+  if(kind==="full") echAddRow({label:"Honoraires mission",pct:100,amount:ht,dueDate:end,status:"prevu"});
+  else if(kind==="30-70"){ echAddRow({label:"Acompte",pct:30,amount:Math.round(ht*0.3),dueDate:start,status:"prevu"}); echAddRow({label:"Solde",pct:70,amount:ht-Math.round(ht*0.3),dueDate:end,status:"prevu"}); }
+  else if(kind==="50-50"){ echAddRow({label:"Acompte",pct:50,amount:Math.round(ht*0.5),dueDate:start,status:"prevu"}); echAddRow({label:"Solde",pct:50,amount:ht-Math.round(ht*0.5),dueDate:end,status:"prevu"}); }
+  else if(kind==="3"){ const p=Math.round(ht/3); echAddRow({label:"Échéance 1",pct:33.33,amount:p,dueDate:start,status:"prevu"}); echAddRow({label:"Échéance 2",pct:33.33,amount:p,dueDate:"",status:"prevu"}); echAddRow({label:"Échéance 3",pct:33.34,amount:ht-2*p,dueDate:end,status:"prevu"}); }
+  echRenderHint();
+}
+function echRenderHint(){
+  const h=document.getElementById("ech-hint"); if(!h) return;
+  let sum=0; echRows().querySelectorAll(".ech-amt").forEach(a=>{ sum+=parseFloat(a.value)||0; });
+  const ht=echMontantHT(), diff=ht-sum, cur=val("f-mcur");
+  h.innerHTML = ht>0 ? `Réparti : <b>${fmt(sum,cur)}</b> / ${fmt(ht,cur)} — ${diff===0?"✓ équilibré":(diff>0?("reste "+fmt(diff,cur)+" à répartir"):("dépasse de "+fmt(-diff,cur)))}`
+    : `Renseignez le montant HT puis choisissez un modèle d'échéancier (ou ajoutez les échéances à la main).`;
+  h.style.color = (ht>0&&diff===0)?"var(--green)":(ht>0?"var(--orange)":"var(--muted)");
+}
+function echInit(m){
+  const c=echRows(); if(!c) return; c.innerHTML="";
+  const linked=(m&&m.id)?DB.transactions.filter(t=>t.missionId===m.id).sort((a,b)=>((a.dueDate||a.date||"")).localeCompare(b.dueDate||b.date||"")):[];
+  if(linked.length){ linked.forEach(t=>echAddRow({txId:t.id,label:t.label,amount:t.amount,dueDate:t.dueDate||t.date,status:t.status})); }
+  else if(m && m.montantHT>0){
+    const ht=m.montantHT, ac=m.acompte||0;
+    if(ac>0){ echAddRow({label:"Acompte",amount:ac,dueDate:m.startDate||todayISO(),status:"realise"}); echAddRow({label:"Solde",amount:ht-ac,dueDate:m.endDate||"",status:"prevu"}); }
+    else echAddRow({label:"Honoraires mission",amount:ht,dueDate:m.endDate||todayISO(),status:"prevu"});
+  }
+  echRenderHint();
+}
+function syncMissionEcheances(mid, m){
+  const cur=m.currency, keep=[];
+  let data=[...document.querySelectorAll("#ech-rows .ech-row")].map(r=>({
+    txId:r.dataset.txid, label:(r.querySelector(".ech-label").value||"Échéance").trim(),
+    amount:Math.round(parseFloat(r.querySelector(".ech-amt").value)||0),
+    dueDate:r.querySelector(".ech-due").value, status:r.querySelector(".ech-status").value
+  })).filter(d=>d.amount>0);
+  if(!data.length && m.montantHT>0) data=[{txId:"",label:"Honoraires mission",amount:m.montantHT,dueDate:m.endDate||todayISO(),status:"prevu"}];
+  data.forEach(d=>{
+    const due=d.dueDate||todayISO();
+    if(d.txId){ const t=DB.transactions.find(x=>x.id===d.txId);
+      if(t){ const wasReal=t.status==="realise";
+        Object.assign(t,{sens:"entrant",label:d.label,amount:d.amount,currency:cur,category:"Honoraires mission",clientId:m.clientId,missionId:mid,dueDate:due,status:d.status});
+        t.date = d.status==="realise" ? (wasReal? t.date : due) : (t.date||due);
+        keep.push(t.id); } }
+    else { const t={id:uid(),sens:"entrant",label:d.label,amount:d.amount,currency:cur,method:"",category:"Honoraires mission",clientId:m.clientId,missionId:mid,date:due,dueDate:due,status:d.status}; DB.transactions.push(t); keep.push(t.id); }
+  });
+  DB.transactions=DB.transactions.filter(t=>t.missionId!==mid || keep.includes(t.id));
 }
 function saveMission(id){
   const obj={ref:val("f-ref").trim(),clientId:val("f-mclient"),type:val("f-mtype"),phase:val("f-mphase"),startDate:val("f-mstart"),endDate:val("f-mend"),
-    montantHT:parseFloat(val("f-mmontant"))||0,currency:val("f-mcur"),acompte:parseFloat(val("f-macompte"))||0,
+    montantHT:parseFloat(val("f-mmontant"))||0,currency:val("f-mcur"),
     nda:document.getElementById("f-nda").checked,contrat:document.getElementById("f-contrat").checked,rapport:document.getElementById("f-rapport").checked,
     status:val("f-mstatus"),notes:val("f-mnotes")};
-  if(id){Object.assign(DB.missions.find(x=>x.id===id),obj);}else{obj.id=uid();DB.missions.push(obj);}
-  save();closeModal();renderMissions();toast("Mission enregistrée.");
+  let mid=id;
+  if(id){Object.assign(DB.missions.find(x=>x.id===id),obj);}else{obj.id=uid();mid=obj.id;DB.missions.push(obj);}
+  const m=DB.missions.find(x=>x.id===mid);
+  syncMissionEcheances(mid, m);
+  // acompte = somme encaissée (dérivé des transactions liées)
+  m.acompte=DB.transactions.filter(t=>t.missionId===mid&&t.status==="realise").reduce((s,t)=>s+(t.amount||0),0);
+  save();closeModal();refreshAll();toast("Mission enregistrée — Budget & CA mis à jour.");
 }
+function missionEncaisse(id){ return DB.transactions.filter(t=>t.missionId===id&&t.status==="realise").reduce((s,t)=>s+(t.amount||0),0); }
 function deleteMission(id){
-  const linked=DB.risks.filter(r=>r.missionId===id).length;
-  confirmModal("Supprimer cette mission ?", (linked?`${linked} risque(s) y sont liés (ils perdront le lien). `:"")+"Action définitive.",
-    ()=>{DB.missions=DB.missions.filter(x=>x.id!==id);DB.risks.forEach(r=>{if(r.missionId===id)r.missionId="";});save();renderMissions();toast("Mission supprimée.");});
+  const linkedRisks=DB.risks.filter(r=>r.missionId===id).length;
+  const linkedTx=DB.transactions.filter(t=>t.missionId===id).length;
+  confirmModal("Supprimer cette mission ?",
+    (linkedRisks?`${linkedRisks} risque(s) y sont liés (ils perdront le lien). `:"")+
+    (linkedTx?`<b>${linkedTx} ligne(s) de facturation liée(s)</b> seront supprimées du Budget & CA. `:"")+"Action définitive.",
+    ()=>{DB.missions=DB.missions.filter(x=>x.id!==id);DB.risks.forEach(r=>{if(r.missionId===id)r.missionId="";});
+      DB.transactions=DB.transactions.filter(t=>t.missionId!==id);
+      save();refreshAll();toast("Mission supprimée.");});
 }
 
 /* ----------------------------- Matrice des risques ----------------------------- */
@@ -1976,16 +2107,26 @@ function printPortfolioReport(){
 
 /* ----------------------------- IA générative (Mistral) ----------------------------- */
 let lastAIAdvice="";
-async function aiChat(system, user, maxTokens){
+async function aiComplete(messages, maxTokens){
   const key=(DB.meta.mistralKey||"").trim();
   if(!key||key.length<10) throw new Error("Clé API Mistral non configurée — ouvre ⚙ Paramètres pour la saisir.");
   const resp=await fetch("https://api.mistral.ai/v1/chat/completions",{
     method:"POST",
     headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},
-    body:JSON.stringify({model:DB.meta.aiModel||"mistral-large-latest",max_tokens:maxTokens||900,messages:[{role:"system",content:system},{role:"user",content:user}]})
+    body:JSON.stringify({model:DB.meta.aiModel||"mistral-large-latest",max_tokens:maxTokens||900,messages:messages})
   });
   if(!resp.ok){ let e={}; try{e=await resp.json();}catch(_){} throw new Error((e.error&&e.error.message)||e.message||(typeof e.detail==="string"?e.detail:"")||"Erreur API "+resp.status); }
   const data=await resp.json(); return data.choices[0].message.content;
+}
+function memoryHint(){
+  const mem=DB.aiMemory||[], conseils=DB.advice.custom||[];
+  let h="";
+  if(mem.length) h+="\nÀ retenir (préférences / faits validés / corrections) : "+mem.map(m=>m.text).join(" ; ");
+  if(conseils.length) h+="\nStyle des conseils déjà validés par l'utilisateur : "+conseils.slice(-6).map(c=>(c.text||"").slice(0,120)).join(" | ");
+  return h?("\n"+h):"";
+}
+async function aiChat(system, user, maxTokens){
+  return aiComplete([{role:"system",content:system+memoryHint()},{role:"user",content:user}], maxTokens);
 }
 function buildAIContext(){
   const a=agg();
@@ -2072,6 +2213,56 @@ function aiSaveClientAdvice(){
   c.followupSummary=(c.followupSummary?c.followupSummary+"\n\n":"")+"[IA] "+window.__caiRes;
   save(); closeModal(); renderClientFiche(); toast("Conseil enregistré dans le résumé de suivi.");
 }
+
+/* --- Assistant conversationnel + mémoire apprenante --- */
+function aiSystemPrompt(){
+  let s="Tu es l'assistant IA de "+(DB.meta.cabinetName||"BSM Advisory & Consulting")+", cabinet de gouvernance des risques (méthode R5, Madagascar). Tu aides à piloter le cabinet — conseils, analyses, décisions — en français, de façon concise et actionnable. Utilise les données et la mémoire ci-dessous ; si une information manque, dis-le clairement plutôt que d'inventer.\n\n=== DONNÉES ACTUELLES DU CABINET ===\n"+buildAIContext();
+  const mem=DB.aiMemory||[]; if(mem.length) s+="\n\n=== MÉMOIRE (préférences, faits validés, corrections à respecter) ===\n"+mem.map(m=>"- "+m.text).join("\n");
+  const conseils=DB.advice.custom||[]; if(conseils.length) s+="\n\n=== CONSEILS DÉJÀ RETENUS PAR L'UTILISATEUR (aligne ton style dessus) ===\n"+conseils.slice(-8).map(c=>"- "+(c.text||"").slice(0,160)).join("\n");
+  return s.length>9000?s.slice(0,9000)+"…":s;
+}
+function openAiChat(){ const d=document.getElementById("ai-drawer"); if(d)d.classList.add("open"); renderAiChat(); setTimeout(function(){var i=document.getElementById("ai-chat-input");if(i)i.focus();},60); }
+function closeAiChat(){ const d=document.getElementById("ai-drawer"); if(d)d.classList.remove("open"); }
+function clearAiChat(){ if(!DB.aiChat.length||confirm("Effacer cette conversation ? (la mémoire est conservée)")){ DB.aiChat=[]; save(); renderAiChat(); } }
+function renderAiChat(){
+  const el=document.getElementById("ai-msgs"); if(!el) return;
+  const msgs=DB.aiChat||[];
+  el.innerHTML = msgs.length ? msgs.map(function(m,i){ return m.role==="user"
+    ? '<div class="ai-msg user">'+esc(m.content)+'</div>'
+    : '<div class="ai-msg bot"><div style="white-space:pre-wrap">'+esc(m.content)+'</div><button class="ai-remember" onclick="rememberAiMsg('+i+')">🧠 Retenir dans la mémoire</button></div>'; }).join("")
+    : '<div class="ai-empty">👋 Pose-moi une question sur ton cabinet, tes clients ou tes risques.<br>J\'ai accès à tes données et à ma mémoire, et je retiens ce que tu me demandes de retenir (🧠).</div>';
+  el.scrollTop=el.scrollHeight;
+}
+async function sendAiChat(){
+  const inp=document.getElementById("ai-chat-input"); const q=((inp&&inp.value)||"").trim();
+  if(!q) return;
+  if(!(DB.meta.mistralKey||"").trim()){ toast("Configure ta clé Mistral dans ⚙ Paramètres."); openSettings(); return; }
+  if(inp) inp.value="";
+  DB.aiChat.push({role:"user",content:q}); save(); renderAiChat();
+  const el=document.getElementById("ai-msgs");
+  const typing=document.createElement("div"); typing.className="ai-msg bot"; typing.textContent="…";
+  if(el){ el.appendChild(typing); el.scrollTop=el.scrollHeight; }
+  try{
+    const history=DB.aiChat.slice(-20).map(function(m){return{role:m.role,content:m.content};});
+    const res=await aiComplete([{role:"system",content:aiSystemPrompt()}].concat(history), 900);
+    DB.aiChat.push({role:"assistant",content:res}); save(); renderAiChat();
+  }catch(e){ if(typing) typing.textContent="⚠ "+e.message; }
+}
+function rememberAiMsg(idx){
+  const m=DB.aiChat[idx]; if(!m) return;
+  DB.aiMemory.push({id:uid(),text:m.content.slice(0,400),date:todayISO(),source:"conversation"});
+  save(); toast("Retenu dans la mémoire de l'assistant.");
+}
+function toggleAiMemory(){ const el=document.getElementById("ai-mem-panel"); if(!el) return; const show=el.style.display==="none"; el.style.display=show?"block":"none"; if(show) renderAiMemory(); }
+function renderAiMemory(){
+  const el=document.getElementById("ai-mem-panel"); if(!el) return;
+  const mem=DB.aiMemory||[];
+  el.innerHTML='<div style="font-size:10.5px;color:var(--muted);letter-spacing:.04em;margin-bottom:6px">🧠 MÉMOIRE — ce que l\'assistant retient (préférences, faits, corrections)</div>'
+    +(mem.length? mem.map(function(m){return '<div class="ai-mem-item"><span>'+esc(m.text)+'</span><button class="iconbtn del" onclick="deleteAiMemory(\''+m.id+'\')">✕</button></div>';}).join("") : '<div class="hint">Vide. Ajoute des consignes durables ci-dessous, ou clique « 🧠 Retenir » sous une réponse.</div>')
+    +'<div style="display:flex;gap:6px;margin-top:8px"><input id="ai-mem-new" placeholder="Ex. Toujours proposer un diagnostic gratuit d\'abord" style="flex:1;padding:7px 9px;border:1px solid var(--line);border-radius:6px;font-size:12.5px;font-family:inherit" onkeydown="if(event.key===\'Enter\')addAiMemory()"><button class="cta ghost sm" onclick="addAiMemory()">+ Retenir</button></div>';
+}
+function addAiMemory(){ const i=document.getElementById("ai-mem-new"); const t=((i&&i.value)||"").trim(); if(!t) return; DB.aiMemory.push({id:uid(),text:t,date:todayISO(),source:"manuel"}); save(); renderAiMemory(); toast("Ajouté à la mémoire."); }
+function deleteAiMemory(id){ DB.aiMemory=(DB.aiMemory||[]).filter(function(x){return x.id!==id;}); save(); renderAiMemory(); }
 
 /* ----------------------------- Portail d'accès ----------------------------- */
 function portalNeeded(){ return !(localStorage.getItem("bsm_portal_ok")||sessionStorage.getItem("bsm_portal_ok")); }
