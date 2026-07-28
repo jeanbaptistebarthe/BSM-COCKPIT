@@ -1206,6 +1206,22 @@ const CLASSIF_LEVELS=[
 function classifMeta(k){ return CLASSIF_LEVELS.find(x=>x.key===k)||CLASSIF_LEVELS[1]; }
 function classifBadge(k){ if(!k) return ""; const m=classifMeta(k); return `<span class="badge ${m.badge}" title="Niveau de confidentialité">🔐 ${m.label}</span>`; }
 function classifOptions(sel){ return CLASSIF_LEVELS.map(l=>`<option value="${l.key}" ${sel===l.key?"selected":""}>${l.label}</option>`).join(""); }
+/* Règles associées à chaque niveau (référentiel affiché dans les Paramètres ; appliquées progressivement). */
+const CLASSIF_RULES={
+  public:           {read:"Tous",                 exp:"Oui",            ai:"Oui",       enc:"Standard", ret:"Illimité",      log:"Normale"},
+  interne:          {read:"Collaborateur +",       exp:"Oui",            ai:"Oui (filtré)",enc:"Standard", ret:"5 ans",         log:"Normale"},
+  confidentiel:     {read:"Analyste / Direction +",exp:"Direction",      ai:"Masqué",    enc:"Renforcé", ret:"5 ans",         log:"Renforcée"},
+  tres_confidentiel:{read:"Direction / Admin",     exp:"Admin + motif",  ai:"Non",       enc:"Renforcé", ret:"Selon contrat", log:"Renforcée"}
+};
+function classifRank(k){ return {public:1,interne:1,confidentiel:2,tres_confidentiel:3}[k]||1; }
+function classifPolicyTableHtml(){
+  return `<div style="overflow-x:auto"><table style="margin-top:8px;font-size:12px;min-width:560px"><thead><tr>
+      <th>Niveau</th><th>Qui peut lire</th><th>Export</th><th>IA externe</th><th>Chiffrement</th><th>Rétention</th><th>Journal.</th></tr></thead><tbody>`+
+    CLASSIF_LEVELS.map(l=>{const r=CLASSIF_RULES[l.key];return `<tr>
+      <td>${classifBadge(l.key)}</td><td>${r.read}</td><td>${r.exp}</td><td>${r.ai}</td><td>${r.enc}</td><td>${r.ret}</td><td>${r.log}</td></tr>`;}).join("")+
+    `</tbody></table></div>
+    <div class="hint" style="margin-top:6px">👑 <b>Administrateur & Direction voient tout</b>, quel que soit le niveau. Ces règles restreignent les profils à accès limité, l'export et l'envoi à l'IA — <b>application progressive</b> (lecture cloisonnée déjà active côté serveur ; export & IA en cours d'implémentation).</div>`;
+}
 function openClientForm(id){
   const c = id? DB.clients.find(x=>x.id===id) : {status:"prospect"};
   openModal(`
@@ -3491,6 +3507,9 @@ function openSettings(){
       <div style="display:flex;gap:8px"><button class="cta ghost sm" onclick="exportData()">⬇ Exporter un fichier</button>
       <button class="cta ghost sm" onclick="document.getElementById('import-file').click()">⬆ Restaurer un fichier</button></div>
       <div class="hint">Vos données sont stockées sur ce PC (ce navigateur). Exportez régulièrement un fichier de sauvegarde pour ne rien perdre.</div></div>
+    <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+    <div class="field"><label>🔐 Niveaux de confidentialité — référentiel & règles</label>
+      ${classifPolicyTableHtml()}</div>
     <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
     <div class="field"><label>☁️ Cloud Supabase (bêta) — synchronisation sécurisée multi-organisation</label>
       <div id="cloud-panel"><div class="hint">…</div></div></div>
