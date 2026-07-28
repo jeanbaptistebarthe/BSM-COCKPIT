@@ -1489,8 +1489,7 @@ function docChrome(innerHtml, opt){
     +`<div style="font-size:11px;color:${GR};margin-top:4px">Date : _______________</div></div></div>`
     +`<div style="margin-top:20px;text-align:center;font-size:10px;color:${GR}">${esc(cabinet)} — ${esc(s.adr)} — ${esc(s.email)} — ${esc(s.tel)}</div>`
     +`<div style="margin-top:4px;text-align:center;font-size:9px;color:${GR}">Document émis par ${esc(s.rs)} — NIF ${esc(s.nif)} · STAT ${esc(s.stat)}</div>`
-    +`</div><script>if('serviceWorker' in navigator && location.protocol.startsWith('http')){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
-</body></html>`;
+    +`</div></body></html>`;
 }
 function nextDocRef(type){ const code={devis:"DV",proposition:"PC",contrat:"CT",nda:"NDA",avenant:"AV",autre:"DOC"}[type]||"DOC";
   const y=new Date().getFullYear(); const n=(DB.clientDocs||[]).filter(d=>d.type===type).length+1;
@@ -5230,5 +5229,6 @@ document.addEventListener("click", function(e){
 serverSyncInit(); // détecte le serveur local BSM (si l'app est ouverte via http://…) et synchronise
 if(portalNeeded()) showPortal();
 </script>
+<script>if('serviceWorker' in navigator && location.protocol.startsWith('http')){window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){});});}</script>
 </body>
 </html>
