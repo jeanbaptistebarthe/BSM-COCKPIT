@@ -586,7 +586,7 @@ async function cloudImportLocal(onProgress){
   for(const col of CLOUD_COLLECTIONS){
     const arr = Array.isArray(DB[col]) ? DB[col] : []; if(!arr.length) continue;
     const rows = arr.map(item => ({ organization_id:cloudOrgId, collection:col,
-      record_id:String(item.id||item.key||JSON.stringify(item).slice(0,40)), data:item, classification:"interne" }));
+      record_id:String(item.id||item.key||JSON.stringify(item).slice(0,40)), data:item, classification:(item.classification||"interne") }));
     for(let i=0;i<rows.length;i+=200){
       const chunk=rows.slice(i,i+200);
       const { error } = await c.from("records").upsert(chunk, { onConflict:"organization_id,collection,record_id" });
@@ -1189,13 +1189,23 @@ function renderClients(){
         return `<tr><td><a class="clink" onclick="openClientFiche('${c.id}')">${esc(c.company)}</a>${c.notes?`<br><span style="color:var(--muted);font-size:11.5px">${esc(c.notes).slice(0,60)}</span>`:""}</td>
         <td>${esc(c.sector||"—")}</td>
         <td>${esc(c.contactName||"—")}${c.contactPhone?`<br><span style="color:var(--muted);font-size:11.5px">${esc(c.contactPhone)}</span>`:""}</td>
-        <td><span class="badge ${statusBadge(c.status)}">${cap(c.status)}</span></td>
+        <td><span class="badge ${statusBadge(c.status)}">${cap(c.status)}</span>${c.classification&&c.classification!=='interne'?'<br>'+classifBadge(c.classification):''}</td>
         <td>${ca?fmtD(ca):"—"}</td>
         <td><div class="rowact"><button class="iconbtn" title="Fiche 360°" onclick="openClientFiche('${c.id}')">👁</button><button class="iconbtn" title="Modifier" onclick="openClientForm('${c.id}')">✎</button><button class="iconbtn del" title="Supprimer" onclick="deleteClient('${c.id}')">🗑</button></div></td></tr>`;
       }).join("")+`</tbody></table>`
       : `<div class="empty">Aucun client ${clientFilter!=='tous'?'dans ce filtre':'pour le moment'}. Cliquez « + Nouveau client ».</div>`}
     </div>`;
 }
+/* ------- Classification des données : Public / Interne / Confidentiel / Très confidentiel ------- */
+const CLASSIF_LEVELS=[
+  {key:"public",label:"Public",badge:"b-green"},
+  {key:"interne",label:"Interne",badge:"b-grey"},
+  {key:"confidentiel",label:"Confidentiel",badge:"b-orange"},
+  {key:"tres_confidentiel",label:"Très confidentiel",badge:"b-red"}
+];
+function classifMeta(k){ return CLASSIF_LEVELS.find(x=>x.key===k)||CLASSIF_LEVELS[1]; }
+function classifBadge(k){ if(!k) return ""; const m=classifMeta(k); return `<span class="badge ${m.badge}" title="Niveau de confidentialité">🔐 ${m.label}</span>`; }
+function classifOptions(sel){ return CLASSIF_LEVELS.map(l=>`<option value="${l.key}" ${sel===l.key?"selected":""}>${l.label}</option>`).join(""); }
 function openClientForm(id){
   const c = id? DB.clients.find(x=>x.id===id) : {status:"prospect"};
   openModal(`
@@ -1211,6 +1221,8 @@ function openClientForm(id){
     <div class="field row2"><label>Statut & responsable</label><select id="f-status">
       ${["prospect","actif","archive"].map(s=>`<option value="${s}" ${c.status===s?'selected':''}>${cap(s)}</option>`).join("")}</select>
       <select id="f-cresp"><option value="">— Responsable non attribué —</option>${(DB.users||[]).filter(u=>u.active!==false).map(u=>`<option value="${esc(u.login)}" ${c.responsable===u.login?'selected':''}>${esc(u.name||u.login)}</option>`).join("")}</select></div>
+    <div class="field"><label>🔐 Niveau de confidentialité</label><select id="f-cclassif">${classifOptions(c.classification||"interne")}</select>
+      <div class="hint">Détermine qui peut voir et exporter ces données, et si elles peuvent être envoyées à l'IA. Par défaut : Interne. Un dossier sensible (audit, PCA, finances) → Confidentiel ou Très confidentiel.</div></div>
     <div style="border-top:1px solid var(--line);margin:6px 0 12px;padding-top:10px;font-size:11px;color:var(--muted);letter-spacing:.04em">CONTRAT & MISSION</div>
     <div class="field row2"><label>Date de signature & type de contrat</label>
       <input type="date" id="f-sign" value="${c.signatureDate||''}">
@@ -1236,7 +1248,7 @@ function saveClient(id){
   const company=val("f-company").trim();
   if(!company){ toast("Le nom de la société est obligatoire."); return; }
   const obj={ company, sector:val("f-sector"), contactName:val("f-cname"), contactPhone:val("f-cphone"),
-    contactEmail:val("f-cemail"), status:val("f-status"), responsable:val("f-cresp"), notes:val("f-notes"),
+    contactEmail:val("f-cemail"), status:val("f-status"), responsable:val("f-cresp"), classification:val("f-cclassif"), notes:val("f-notes"),
     signatureDate:val("f-sign"), contractType:val("f-ctype"), ndaSigned:document.getElementById("f-cnda").checked,
     ndaDate:val("f-cndadate"), contractInfo:val("f-cinfo"), missionSummary:val("f-msum"), followupSummary:val("f-fsum"),
     fichesDues:document.getElementById("f-cfiches").checked };
@@ -1339,7 +1351,7 @@ function renderClientFiche(){
   el.innerHTML=`
     <button class="backlink" onclick="setScreen('clients')">← Retour aux clients</button>
     <div class="pagetitle">
-      <div><h1>${esc(c.company)}</h1><div class="sub">${esc(c.sector||'—')} · <span class="badge ${statusBadge(c.status)}">${cap(c.status)}</span>${c.contactName?' · '+esc(c.contactName):''}${c.contactPhone?' · '+esc(c.contactPhone):''}${c.contactEmail?' · '+esc(c.contactEmail):''}</div></div>
+      <div><h1>${esc(c.company)}</h1><div class="sub">${esc(c.sector||'—')} · <span class="badge ${statusBadge(c.status)}">${cap(c.status)}</span>${c.classification?' · '+classifBadge(c.classification):''}${c.contactName?' · '+esc(c.contactName):''}${c.contactPhone?' · '+esc(c.contactPhone):''}${c.contactEmail?' · '+esc(c.contactEmail):''}</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">${canFinance()?`<button class="cta ghost" onclick="aiClientAdvice('${c.id}')">🤖 Conseil IA</button><button class="cta ghost" onclick="printClientReport('${c.id}')">🖨 Rapport</button>`:""}<button class="cta ghost" onclick="openClientForm('${c.id}')">✎ Modifier</button></div>
     </div>
     <div class="card" style="padding:12px 14px">
