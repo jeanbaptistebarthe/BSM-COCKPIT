@@ -280,6 +280,7 @@
     <div class="navitem" data-scr="roi" onclick="setScreen('roi')"><span class="ic">📊</span><span class="lbl">ROI & Investissements</span></div>
     <div class="navitem" data-scr="monitoring" onclick="setScreen('monitoring')"><span class="ic">🩺</span><span class="lbl">Monitoring & suivi</span></div>
     <div class="navitem" data-scr="aireport" onclick="setScreen('aireport')"><span class="ic">🤖</span><span class="lbl">Reporting IA</span></div>
+    <div class="navitem" data-scr="aiassist" onclick="setScreen('aiassist')"><span class="ic">🧩</span><span class="lbl">Assistants IA</span></div>
     <div class="navgroup">MÉTHODE R5®</div>
     <div class="navitem" data-scr="missions" onclick="setScreen('missions')"><span class="ic">🎯</span><span class="lbl">Missions</span></div>
     <div class="navitem" data-scr="risks" onclick="setScreen('risks')"><span class="ic">⚠️</span><span class="lbl">Matrice des risques</span></div>
@@ -307,6 +308,7 @@
     <div class="screen" id="scr-resultat"></div>
     <div class="screen" id="scr-roi"></div>
     <div class="screen" id="scr-aireport"></div>
+    <div class="screen" id="scr-aiassist"></div>
     <div class="screen" id="scr-monitoring"></div>
     <div class="screen" id="scr-missions"></div>
     <div class="screen" id="scr-risks"></div>
@@ -462,6 +464,8 @@ function load(){
   DB.users=DB.users||[]; DB.activityLog=DB.activityLog||[]; DB.notifications=DB.notifications||[]; DB.moneyRequests=DB.moneyRequests||[]; DB.investments=DB.investments||[]; DB.decisions=DB.decisions||[];
   DB.a1vehicles=DB.a1vehicles||[]; DB.a1logs=DB.a1logs||[]; DB.a1offers=DB.a1offers||[];
   DB.docTemplates=DB.docTemplates||[]; DB.clientDocs=DB.clientDocs||[]; DB.aiUsage=DB.aiUsage||[];
+  DB.assistants=DB.assistants||[]; DB.aiSettings=DB.aiSettings||[];
+  if(!DB.meta.assistantsSeeded){ if(!DB.assistants.length){ DB.assistants=defaultAssistants(); DB.aiSettings=[{ id:"main", basePrompt:defaultAiBasePrompt(), routing:defaultAiRouting() }]; } DB.meta.assistantsSeeded=true; }
   if(!DB.catalog) DB.catalog=defaultCatalog();
   if(!DB.meta.deck) DB.meta.deck=defaultDeck();
   DB.users.forEach(ensureUserPerms); // matérialise les permissions (migration des comptes existants)
@@ -553,7 +557,7 @@ function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); serverPush
    La clé "publishable" est PUBLIQUE par nature — l'accès aux données est verrouillé par la RLS (isolation par organisation). */
 const SB_URL = "https://fxaeeplylyeitukctlph.supabase.co";
 const SB_KEY = "sb_publishable_SrXvreUFVJgLLBi6PLvA-g_ARBg2SST";
-const CLOUD_COLLECTIONS = ["clients","events","transactions","missions","risks","recommendations","employees","recruitments","leaves","activities","documents","playbooks","recurring","jobs","primes","devis","moneyRequests","investments","decisions","a1vehicles","a1logs","a1offers","docTemplates","clientDocs","aiUsage"];
+const CLOUD_COLLECTIONS = ["clients","events","transactions","missions","risks","recommendations","employees","recruitments","leaves","activities","documents","playbooks","recurring","jobs","primes","devis","moneyRequests","investments","decisions","a1vehicles","a1logs","a1offers","docTemplates","clientDocs","aiUsage","assistants","aiSettings"];
 let _sb=null, cloudOrgId=null, cloudPrimary=false, _cloudTimer=null;
 /* Snapshot des identifiants déjà poussés PAR CE POSTE, par collection.
    Sert à propager les suppressions SANS jamais effacer ce qu'un AUTRE poste aurait ajouté
@@ -997,7 +1001,7 @@ function setScreen(name){
 }
 function renderScreen(name){
   ({dashboard:renderDashboard, clients:renderClients, agenda:renderAgenda,
-    budget:renderBudget, ca:renderCA, resultat:renderResultat, roi:renderROI, aireport:renderAireport, monitoring:renderMonitoring, missions:renderMissions, risks:renderRisks,
+    budget:renderBudget, ca:renderCA, resultat:renderResultat, roi:renderROI, aireport:renderAireport, aiassist:renderAiassist, monitoring:renderMonitoring, missions:renderMissions, risks:renderRisks,
     carto:renderCarto, recos:renderRecos, rh:renderRH, audit:renderAudit, "a1fleet":renderA1Fleet,
     commercial:renderCommercial, documentation:renderDocumentation, fiches:renderFiches, clientfiche:renderClientFiche, analyses:renderAnalyses,
     "admin-users":renderAdminUsers, "admin-log":renderAdminLog}[name]||(()=>{}))();
@@ -4984,17 +4988,18 @@ function aiProviderConf(){
   if(mis.length>=10) return { name:"mistral", url:"https://api.mistral.ai/v1/chat/completions", key:mis, model:DB.meta.aiModel||"mistral-large-latest" };
   return null;
 }
-async function aiComplete(messages, maxTokens, sector){
+async function aiComplete(messages, maxTokens, sector, modelOverride){
   const p=aiProviderConf();
   if(!p) throw new Error("Aucune clé API IA configurée — ouvre ⚙ Paramètres (Mammouth ou Mistral).");
+  const model=(p.name==="mammouth" && modelOverride) ? modelOverride : p.model;   // le routage par assistant ne s'applique qu'à Mammouth (multi-modèles)
   const resp=await fetch(p.url,{
     method:"POST",
     headers:{"Content-Type":"application/json","Authorization":"Bearer "+p.key},
-    body:JSON.stringify({model:p.model,max_tokens:maxTokens||900,messages:messages})
+    body:JSON.stringify({model:model,max_tokens:maxTokens||900,messages:messages})
   });
   if(!resp.ok){ let e={}; try{e=await resp.json();}catch(_){} throw new Error((e.error&&e.error.message)||e.message||(typeof e.detail==="string"?e.detail:"")||"Erreur API "+resp.status); }
   const data=await resp.json();
-  try{ recordAiUsage(p.name, data.model||p.model, data.usage, sector); }catch(_){}   // comptage (ne bloque jamais la réponse)
+  try{ recordAiUsage(p.name, data.model||model, data.usage, sector); }catch(_){}   // comptage (ne bloque jamais la réponse)
   return data.choices[0].message.content;
 }
 function memoryHint(){
@@ -5004,8 +5009,36 @@ function memoryHint(){
   if(conseils.length) h+="\nStyle des conseils déjà validés par l'utilisateur : "+conseils.slice(-6).map(c=>(c.text||"").slice(0,120)).join(" | ");
   return h?("\n"+h):"";
 }
+/* ---- Assistants IA calibrés : prompt de base + assistants spécialisés + routage par modèle (Claude/GPT selon la tâche) ---- */
+function defaultAiBasePrompt(){ return "Tu es un assistant du cabinet BSM Advisory & Consulting (gouvernance des risques, résilience opérationnelle, gestion de crise ; Antananarivo, Madagascar ; méthode propriétaire R5 : Reveal, Connect, Respond, Strengthen, Review).\nRègles : réponds en français, ton professionnel et institutionnel, précis et actionnable. BSM PROPOSE, le client DÉCIDE (les recommandations sont des conseils, jamais des décisions imposées). Ne divulgue jamais les informations d'un client à un autre. Si une donnée manque, dis-le plutôt que d'inventer. Structure tes réponses (titres, puces) quand c'est utile."; }
+function defaultAssistants(){ return [
+  { id:"a-report", name:"Rédacteur de rapports clients", icon:"📝", model:"claude-opus-4.7", maxClassif:"confidentiel", active:true, systemPrompt:"Spécialité : rédaction et analyse de rapports clients (audits, synthèses R5, gouvernance). Style soigné, nuancé, structuré ; appuie-toi sur les scores R5 et les risques fournis." },
+  { id:"a-analyste", name:"Analyste risques R5", icon:"⚠️", model:"claude-opus-4.7", maxClassif:"confidentiel", active:true, systemPrompt:"Spécialité : analyse des risques (probabilité × impact), cartographie, protocoles de réponse et recommandations. Distingue un risque MAÎTRISÉ (sous contrôle) d'un risque OUVERT." },
+  { id:"a-direction", name:"Assistant de direction", icon:"🧭", model:"gpt-5.5", maxClassif:"confidentiel", active:true, systemPrompt:"Spécialité : appui à la direction — synthèses, arbitrages, notes courtes et actionnables, lecture du budget et du CA." },
+  { id:"a-rh", name:"Assistant RH", icon:"👥", model:"gpt-5.4", maxClassif:"interne", active:true, systemPrompt:"Spécialité : ressources humaines — fiches de poste, primes, congés, cadre légal malgache (CNaPS/OSTIE, Code du travail)." },
+  { id:"a-commercial", name:"Assistant commercial", icon:"💼", model:"gpt-5.4", maxClassif:"interne", active:true, systemPrompt:"Spécialité : commercial — devis, propositions, relances, argumentaires, présentation des offres BSM." },
+  { id:"a-quick", name:"Assistant rapide (Q&R)", icon:"⚡", model:"gpt-5.4-mini", maxClassif:"interne", active:true, systemPrompt:"Réponses courtes, directes et économes — pour les questions simples et le tri." }
+]; }
+function defaultAiRouting(){ return { conseils:"a-analyste", "client-advice":"a-report", qa:"a-quick", a1:"a-direction", _default:"a-direction" }; }
+function aiSettings(){ if(!Array.isArray(DB.aiSettings)||!DB.aiSettings.length) DB.aiSettings=[{ id:"main", basePrompt:defaultAiBasePrompt(), routing:defaultAiRouting() }]; return DB.aiSettings[0]; }
+function aiBasePrompt(){ return aiSettings().basePrompt||defaultAiBasePrompt(); }
+function aiRouting(){ return aiSettings().routing||defaultAiRouting(); }
+function aiAssistantForSector(sector){
+  const r=aiRouting(), list=DB.assistants||[];
+  let a=list.find(x=>x.id===r[sector]);
+  if(!a||!a.active) a=list.find(x=>x.id===r["_default"]);
+  if(!a||!a.active) a=list.find(x=>x.active);
+  return a||null;
+}
+function aiResolve(sector){
+  const a=aiAssistantForSector(sector);
+  const sysPrefix=aiBasePrompt()+(a&&a.systemPrompt?("\n\n"+a.systemPrompt):"");
+  return { assistant:a, model:(a&&a.model)||null, sysPrefix:sysPrefix };
+}
 async function aiChat(system, user, maxTokens, sector){
-  return aiComplete([{role:"system",content:system+memoryHint()},{role:"user",content:user}], maxTokens, sector);
+  const r=aiResolve(sector);
+  const sys=r.sysPrefix+"\n\n"+system+memoryHint();
+  return aiComplete([{role:"system",content:sys},{role:"user",content:user}], maxTokens, sector, r.model);
 }
 /* ---- Métrologie IA : comptage tokens + coût estimé + report automatique au budget ---- */
 const AI_MODELS_MAMMOUTH=["mammouth-recommended","gpt-5.5","gpt-5.4","gpt-5.4-mini","claude-opus-4.7","mistral-medium-3.1","gemini-3.1-flash-preview","llama-4-maverick","deepseek-v4-flash"];
@@ -5104,6 +5137,66 @@ function renderAireport(){
       <table><thead><tr><th>Modèle</th><th>Prix entrée ($/1M)</th><th>Prix sortie ($/1M)</th></tr></thead><tbody>${priceRows}</tbody></table>
       <div class="hint" style="margin-top:10px">💡 Le coût est reporté chaque mois dans le <b>Budget</b> (catégorie « Intelligence artificielle », entité BSM A&C), donc dans le CA net et le Compte de résultat. <button class="cta ghost sm" onclick="aiSyncBudget();toast('Ligne budget IA recalculée.')">↻ Recalculer la ligne budget maintenant</button></div>
     </div>`;
+}
+function aiClassifOpts(sel){ return [["public","Public"],["interne","Interne"],["confidentiel","Confidentiel"],["tres_confidentiel","Très confidentiel"]].map(o=>`<option value="${o[0]}" ${sel===o[0]?"selected":""}>${o[1]}</option>`).join(""); }
+function readAiassistInputs(){
+  const st=aiSettings();
+  if(document.getElementById("ai-baseprompt")) st.basePrompt=val("ai-baseprompt");
+  const routing=Object.assign({}, st.routing||{});
+  ["conseils","client-advice","qa","a1","_default"].forEach(s=>{ const el=document.getElementById("route-"+s); if(el) routing[s]=el.value; });
+  st.routing=routing;
+  (DB.assistants||[]).forEach(a=>{ if(document.getElementById("as-name-"+a.id)){
+    a.name=val("as-name-"+a.id)||a.name; a.model=val("as-model-"+a.id); a.maxClassif=val("as-classif-"+a.id);
+    a.systemPrompt=val("as-prompt-"+a.id); const ac=document.getElementById("as-active-"+a.id); a.active=ac?ac.checked:a.active; } });
+}
+function saveAiassist(){ readAiassistInputs(); save(); toast("Assistants IA enregistrés."); renderAiassist(); }
+function addAssistant(){ readAiassistInputs(); DB.assistants.push({ id:uid(), name:"Nouvel assistant", icon:"🤖", model:"mammouth-recommended", maxClassif:"confidentiel", active:true, systemPrompt:"" }); save(); renderAiassist(); }
+function deleteAssistant(id){ readAiassistInputs(); DB.assistants=(DB.assistants||[]).filter(a=>a.id!==id);
+  const st=aiSettings(), fb=(DB.assistants[0]&&DB.assistants[0].id)||""; Object.keys(st.routing||{}).forEach(k=>{ if(st.routing[k]===id) st.routing[k]=fb; });
+  save(); renderAiassist(); toast("Assistant supprimé."); }
+function resetAssistants(){ confirmModal("Réinitialiser les assistants ?","Rétablit les assistants et le routage par défaut (Claude pour rédaction/analyse, GPT pour direction/RH/commercial).", ()=>{ DB.assistants=defaultAssistants(); const st=aiSettings(); st.basePrompt=defaultAiBasePrompt(); st.routing=defaultAiRouting(); save(); closeModal(); renderAiassist(); toast("Assistants réinitialisés."); }); }
+function renderAiassist(){
+  const host=document.getElementById("scr-aiassist"); if(!host) return;
+  if(!(isAdmin()||can("aiassist"))){ host.innerHTML=""; return; }
+  const st=aiSettings(), prov=aiProviderConf();
+  const sectors=[["conseils","Conseils portefeuille (Analyses)"],["client-advice","Conseil client (fiche 360°)"],["qa","Questions / réponses"],["a1","Programme A1 (flotte)"],["_default","Chatbot & autres demandes"]];
+  const asOpts=(sel)=>(DB.assistants||[]).map(a=>`<option value="${a.id}" ${sel===a.id?"selected":""}>${esc(a.name)}${a.active?"":" (inactif)"}</option>`).join("");
+  const modelOpts=(sel)=>AI_MODELS_MAMMOUTH.map(m=>`<option value="${m}" ${sel===m?"selected":""}>${m}</option>`).join("");
+  const routeRows=sectors.map(s=>`<tr><td>${esc(s[1])}</td><td><select id="route-${s[0]}">${asOpts((st.routing||{})[s[0]])}</select></td></tr>`).join("");
+  const cards=(DB.assistants||[]).map(a=>`
+    <div class="card" style="border-left:3px solid var(--gold)">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+        <div style="display:flex;align-items:center;gap:8px"><span style="font-size:20px">${a.icon||"🤖"}</span>
+          <input id="as-name-${a.id}" value="${esc(a.name)}" style="font-weight:700;font-size:14px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;min-width:220px"></div>
+        <label style="font-size:12px;display:flex;align-items:center;gap:5px"><input type="checkbox" id="as-active-${a.id}" ${a.active?"checked":""}> actif</label>
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px">
+        <div class="field" style="margin:0"><label>Modèle (Mammouth)</label><select id="as-model-${a.id}">${modelOpts(a.model)}</select></div>
+        <div class="field" style="margin:0"><label>Confidentialité max envoyée</label><select id="as-classif-${a.id}">${aiClassifOpts(a.maxClassif||"confidentiel")}</select></div>
+      </div>
+      <div class="field" style="margin:8px 0 0"><label>Prompt métier (instructions spécifiques)</label>
+        <textarea id="as-prompt-${a.id}" rows="3" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:12.5px">${esc(a.systemPrompt||"")}</textarea></div>
+      <div style="text-align:right;margin-top:6px"><button class="cta ghost sm" style="color:var(--red)" onclick="deleteAssistant('${a.id}')">🗑 Supprimer</button></div>
+    </div>`).join("");
+  host.innerHTML=`
+    <div class="pagetitle"><div><h1>Assistants IA</h1><div class="sub">Calibre tes assistants une fois — chaque tâche part vers le bon modèle. Le chatbot s'appuie dessus.</div></div>
+      <div style="display:flex;gap:8px"><button class="cta ghost" onclick="resetAssistants()">↺ Défaut</button><button class="cta" onclick="saveAiassist()">💾 Enregistrer</button></div></div>
+    <div class="card" style="border-left:3px solid ${prov?'var(--green)':'var(--orange)'}">
+      ${prov?`Fournisseur actif : <b>${prov.name==='mammouth'?'☁️ Mammouth':'Mistral'}</b>. ${prov.name==='mammouth'?'Le routage par modèle ci-dessous est actif.':'⚠️ Le routage par modèle nécessite Mammouth (Mistral ne propose que ses propres modèles) — configure une clé Mammouth dans les Paramètres.'}`:`⚠️ Aucune clé IA configurée — <a href="#" onclick="openSettings();return false">ouvrir les Paramètres</a>.`}
+    </div>
+    <div class="card">
+      <h2>Prompt de base (identité & règles — toujours injecté)</h2>
+      <div class="hint" style="margin:2px 0 8px">Le socle commun à tous les assistants : qui est BSM, la méthode R5, le ton, la confidentialité. Réglé une fois.</div>
+      <textarea id="ai-baseprompt" rows="6" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:6px;font-family:inherit;font-size:12.5px">${esc(st.basePrompt||defaultAiBasePrompt())}</textarea>
+    </div>
+    <div class="card">
+      <h2>Routage — quelle tâche va vers quel assistant</h2>
+      <div class="hint" style="margin:2px 0 8px">Chaque type de demande est traité par l'assistant (donc le modèle) le mieux adapté.</div>
+      <table><thead><tr><th>Type de demande</th><th>Assistant (→ modèle)</th></tr></thead><tbody>${routeRows}</tbody></table>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:6px 2px"><h2 style="margin:0">Assistants (${(DB.assistants||[]).length})</h2><button class="cta ghost sm" onclick="addAssistant()">+ Ajouter un assistant</button></div>
+    ${cards||'<div class="card"><div class="empty">Aucun assistant.</div></div>'}
+    <div class="hint" style="margin:10px 2px">💡 « Confidentialité max envoyée » prépare le cloisonnement : un assistant ne recevra que les données jusqu'à ce niveau (application stricte avec la future couche de protection des données). Les coûts par assistant apparaissent dans <b>Reporting IA</b>.</div>`;
 }
 function buildAIContext(){
   const a=agg();
@@ -5265,6 +5358,7 @@ const PERMSCREENS=[
   {key:"roi",      label:"ROI & Investissements",grp:"PILOTAGE",fin:true},
   {key:"monitoring",label:"Monitoring & suivi",grp:"PILOTAGE"},
   {key:"aireport", label:"Reporting IA",grp:"PILOTAGE",fin:true},
+  {key:"aiassist", label:"Assistants IA",grp:"PILOTAGE",fin:true},
   {key:"missions", label:"Missions (R5)",grp:"MÉTHODE R5"},
   {key:"risks",    label:"Matrice des risques (R5)",grp:"MÉTHODE R5"},
   {key:"carto",    label:"Cartographie (R5)",grp:"MÉTHODE R5"},
@@ -5280,7 +5374,7 @@ function permAll(){ return PERMSCREENS.map(p=>p.key); }
 /* Modèles de rôle = accès par défaut (élargissables ensuite, par utilisateur). clientFinance = voir CA/contrats/devis dans la fiche client. */
 const ROLE_TEMPLATES={
   admin:       { label:"Administrateur", allowed:"*", clientFinance:true },
-  direction:   { label:"Direction",      allowed:["dashboard","clients","agenda","budget","ca","resultat","roi","aireport","monitoring","missions","risks","carto","recos","commercial","rh","audit","documentation","fiches","analyses"], clientFinance:true },
+  direction:   { label:"Direction",      allowed:["dashboard","clients","agenda","budget","ca","resultat","roi","aireport","aiassist","monitoring","missions","risks","carto","recos","commercial","rh","audit","documentation","fiches","analyses"], clientFinance:true },
   analyste:    { label:"Analyste R5",     allowed:["clients","monitoring","missions","risks","carto","recos","audit","documentation","fiches"], clientFinance:false },
   commercial:  { label:"Commercial",      allowed:["clients","agenda","monitoring","commercial","documentation","fiches"], clientFinance:true },
   rh:          { label:"RH",              allowed:["rh","agenda","monitoring","documentation","fiches"], clientFinance:false },
