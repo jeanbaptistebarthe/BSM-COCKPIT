@@ -5203,20 +5203,68 @@ function renderAiassist(){
 const REPORT_TYPES=[
   { key:"hebdo", label:"Rapport hebdomadaire de direction", icon:"🗓️", sector:"_default", classif:"confidentiel",
     desc:"Synthèse de pilotage : activité, finances, risques, alertes, actions de la semaine.",
-    prompt:"Produis le RAPPORT HEBDOMADAIRE DE DIRECTION du cabinet, structuré ainsi : 1) L'essentiel en 3 lignes ; 2) Finances (CA effectif vs prévu, encaissements en retard, trésorerie) ; 3) Clients & risques (risques critiques ouverts, à réviser) ; 4) Alertes & retards ; 5) Trois actions recommandées, en signalant ce qui demande une décision. Reste factuel et appuie-toi UNIQUEMENT sur les données fournies." },
+    sections:[
+      {title:"L'essentiel", instr:"Résume en 3 à 5 lignes la situation du cabinet cette semaine (l'information qu'un dirigeant doit retenir)."},
+      {title:"Finances", instr:"CA effectif vs prévu, encaissements en retard, trésorerie et solde. Donne les chiffres exacts et la tendance."},
+      {title:"Clients & risques", instr:"Clients actifs/prospects, risques critiques ouverts et risques à réviser (méthode R5)."},
+      {title:"Alertes & retards", instr:"Liste les alertes détectées : retards d'encaissement, dépenses, échéances, recommandations en retard."},
+      {title:"Actions recommandées", instr:"3 à 5 actions priorisées pour la semaine à venir, en signalant clairement ce qui demande une décision de la direction."}
+    ]},
   { key:"finance", label:"Rapport financier", icon:"💰", sector:"conseils", classif:"confidentiel",
     desc:"Analyse du chiffre d'affaires, des encaissements, du budget et de la trésorerie.",
-    prompt:"Produis un RAPPORT FINANCIER : analyse du chiffre d'affaires (effectif vs prévu), des encaissements en retard, du budget et de la trésorerie. Dégage les tendances, les points de vigilance et trois recommandations priorisées. Distingue clairement les faits des hypothèses." },
+    sections:[
+      {title:"Synthèse financière", instr:"Vue d'ensemble de la situation financière du cabinet en 4 à 6 lignes."},
+      {title:"Chiffre d'affaires", instr:"CA effectif vs provisoire, par client si pertinent, tendance sur les derniers mois."},
+      {title:"Encaissements & créances", instr:"Encaissements réalisés, montants en retard, créances à relancer."},
+      {title:"Budget & dépenses", instr:"Principales dépenses par poste, charges récurrentes, points de dérive éventuels."},
+      {title:"Trésorerie & tendance", instr:"Solde net, trajectoire de trésorerie, risques de tension."},
+      {title:"Recommandations", instr:"3 à 5 recommandations financières priorisées, en distinguant faits et hypothèses."}
+    ]},
   { key:"risques", label:"Rapport des risques (R5)", icon:"⚠️", sector:"conseils", classif:"confidentiel",
     desc:"État du portefeuille de risques selon la méthode R5.",
-    prompt:"Produis un RAPPORT DES RISQUES du portefeuille selon la méthode R5 : risques critiques ouverts (P×I ≥ 15), risques à réviser, état des recommandations, cartographie synthétique. Hiérarchise et propose des protocoles de réponse réalistes (BSM propose, le client décide)." },
+    sections:[
+      {title:"Synthèse des risques", instr:"Panorama du niveau de risque du portefeuille en 4 à 6 lignes."},
+      {title:"Risques critiques ouverts", instr:"Liste les risques critiques (P×I ≥ 15) non maîtrisés, par client, avec leur score et leur statut."},
+      {title:"Risques à réviser", instr:"Risques dont la revue est due (phase Review de R5)."},
+      {title:"Recommandations en cours", instr:"État d'avancement des recommandations R5 et décisions clients attendues."},
+      {title:"Plan d'action priorisé", instr:"Protocoles de réponse réalistes et priorisés (BSM propose, le client décide)."}
+    ]},
   { key:"client", label:"Rapport client 360°", icon:"🏢", sector:"client-advice", classif:"confidentiel", needsClient:true,
     desc:"Fiche 360° stratégique pour un client donné.",
-    prompt:"Produis une FICHE 360° / RAPPORT STRATÉGIQUE pour ce client : situation globale (risques, gouvernance, maturité R5, actions réalisées), priorités, points d'attention, progrès, risques émergents et recommandations stratégiques. Langage clair pour un dirigeant." },
+    sections:[
+      {title:"Contexte & présentation", instr:"Présente le client, son secteur, son statut et le contexte de la relation."},
+      {title:"Maturité R5 & gouvernance", instr:"Scores R5 (maturité, résilience, gouvernance, maîtrise du risque) et lecture qu'en fait un dirigeant."},
+      {title:"Risques du client", instr:"Principaux risques, hiérarchisés, avec leur criticité et leur statut."},
+      {title:"Missions & actions réalisées", instr:"Missions en cours ou réalisées, livrables, recommandations mises en œuvre."},
+      {title:"Recommandations stratégiques", instr:"Recommandations stratégiques priorisées pour ce client."},
+      {title:"Points d'attention & prochaines étapes", instr:"Points de vigilance, risques émergents et prochaines étapes proposées."}
+    ]},
   { key:"mensuel", label:"Rapport mensuel de synthèse", icon:"📅", sector:"_default", classif:"confidentiel",
     desc:"Synthèse mensuelle : activité, finances, risques, missions, priorités.",
-    prompt:"Produis un RAPPORT MENSUEL DE SYNTHÈSE : activité du cabinet, finances, risques, avancement des missions et des recommandations, alertes, puis priorités du mois suivant." }
+    sections:[
+      {title:"Synthèse générale", instr:"Synthèse de la situation du cabinet ce mois-ci, orientée dirigeant (5 à 8 lignes)."},
+      {title:"Activité du cabinet", instr:"Missions, prospects, clients actifs, faits marquants du mois."},
+      {title:"Situation financière", instr:"CA effectif vs prévu, encaissements en retard, budget, trésorerie et tendance (chiffres exacts)."},
+      {title:"Risques & gouvernance", instr:"Risques critiques ouverts, risques à réviser, avancement des recommandations R5."},
+      {title:"Alertes & points de vigilance", instr:"Alertes détectées (retards, trésorerie, risques, recommandations)."},
+      {title:"Recommandations & priorités", instr:"3 à 5 recommandations priorisées pour le mois suivant, en signalant ce qui demande une décision."}
+    ]}
 ];
+/* Markdown → HTML : rend les rapports proprement (titres, gras, puces) au lieu d'afficher le markdown brut. */
+function mdToHtml(md){
+  const esch=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const inl=s=>esch(s).replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>").replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g,"$1<em>$2</em>");
+  const lines=String(md||"").split(/\r?\n/); let out="", lt=null;
+  const close=()=>{ if(lt){ out+=(lt==="ul"?"</ul>":"</ol>"); lt=null; } };
+  lines.forEach(raw=>{ const line=raw.replace(/\s+$/,""); let m;
+    if(/^\s*$/.test(line)){ close(); return; }
+    if((m=line.match(/^(#{1,6})\s+(.*)$/))){ close(); const lv=Math.min(m[1].length,4); out+="<h"+lv+">"+inl(m[2])+"</h"+lv+">"; return; }
+    if((m=line.match(/^\s*[-*+]\s+(.*)$/))){ if(lt!=="ul"){ close(); out+="<ul>"; lt="ul"; } out+="<li>"+inl(m[1])+"</li>"; return; }
+    if((m=line.match(/^\s*\d+[.)]\s+(.*)$/))){ if(lt!=="ol"){ close(); out+="<ol>"; lt="ol"; } out+="<li>"+inl(m[1])+"</li>"; return; }
+    if(/^\s*-{3,}\s*$/.test(line)){ close(); out+="<hr>"; return; }
+    close(); out+="<p>"+inl(line)+"</p>"; });
+  close(); return out;
+}
 function reportTypeLabel(k){ const t=REPORT_TYPES.find(x=>x.key===k); return t?t.label:k; }
 function repSetType(v){ window.repGenType=v; renderReports(); }
 function repSetFilter(v){ window.repFilter=v; renderReports(); }
@@ -5226,34 +5274,53 @@ async function generateReport(typeKey, clientId){
   let ctx, title=rt.label;
   if(rt.needsClient){ const c=DB.clients.find(x=>x.id===clientId); if(!c){ toast("Choisis un client."); return; } ctx=buildClientContext(c); title=rt.label+" — "+c.company; }
   else ctx=buildAIContext();
-  const btn=document.getElementById("rep-gen-btn"); if(btn){ btn.disabled=true; btn.textContent="Génération en cours…"; }
+  const secs=rt.sections||[{title:rt.label, instr:"Produis le rapport complet."}];
+  const btn=document.getElementById("rep-gen-btn"); const done=[];
   try{
-    const content=await aiChat(rt.prompt, "Données du cabinet :\n"+ctx, 1500, rt.sector);
+    for(let i=0;i<secs.length;i++){
+      if(btn){ btn.disabled=true; btn.textContent="Rédaction… "+(i+1)+"/"+secs.length; }
+      const sys="Tu rédiges UNE seule section — « "+secs[i].title+" » — d'un "+rt.label+" de niveau direction. "+secs[i].instr
+        +" Consignes : complet mais concis, factuel, appuie-toi UNIQUEMENT sur les données fournies ; si une donnée manque, indique-le explicitement ; puces courtes plutôt que tableaux ; n'écris PAS le titre de la section (il est ajouté automatiquement) ; pas de formule de politesse.";
+      const content=await aiChat(sys, "Données :\n"+ctx, 1100, rt.sector);
+      done.push({ title:secs[i].title, content:String(content||"").trim() });
+    }
+    const md="# "+title+"\n\n"+done.map(s=>"## "+s.title+"\n\n"+s.content).join("\n\n");
     const rep={ id:uid(), ts:new Date().toISOString(), type:rt.key, typeLabel:rt.label, title:title, clientId:clientId||"",
-      content:content, model:(aiResolve(rt.sector).model||""), author:(currentUser&&currentUser.name)||"", classification:rt.classif };
+      content:md, sections:done, model:(aiResolve(rt.sector).model||""), author:(currentUser&&currentUser.name)||"", classification:rt.classif };
     if(!Array.isArray(DB.reports)) DB.reports=[]; DB.reports.unshift(rep); if(DB.reports.length>500) DB.reports=DB.reports.slice(0,500);
-    save(); toast("Rapport généré et archivé."); renderReports(); openReport(rep.id);
+    save(); toast("Rapport généré et archivé ("+secs.length+" sections)."); renderReports(); openReport(rep.id);
   }catch(e){ toast("Erreur : "+(e.message||e)); }
   if(btn){ btn.disabled=false; btn.textContent="✦ Générer le rapport"; }
 }
 function openReport(id){ const r=(DB.reports||[]).find(x=>x.id===id); if(!r) return;
   openModal(`<span class="close" onclick="closeModal()">✕</span>
-   <h2>${esc(r.title)}</h2>
-   <div class="msub"><span class="badge b-blue">${esc(reportTypeLabel(r.type))}</span> · ${esc(fmtDateTime(r.ts))} · ${esc(r.author||"")} · modèle ${esc(r.model||"—")}</div>
-   <div style="max-height:58vh;overflow:auto;white-space:pre-wrap;border:1px solid var(--line);border-radius:8px;padding:14px;margin-top:10px;font-size:13px;line-height:1.55">${esc(r.content)}</div>
+   <h2 style="margin-bottom:2px">${esc(r.title)}</h2>
+   <div class="msub"><span class="badge b-blue">${esc(reportTypeLabel(r.type))}</span> · ${esc(fmtDateTime(r.ts))} · ${esc(r.author||"")} · modèle ${esc(r.model||"—")}${r.edited?' · <span style="color:var(--muted)">édité</span>':''}</div>
+   <div class="rbody" style="max-height:56vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:16px;margin-top:10px;font-size:13.5px;line-height:1.6">${mdToHtml(r.content)}</div>
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
      <button class="cta" onclick="printReportPDF('${r.id}')">🖨 PDF</button>
      <button class="cta ghost" onclick="copyReport('${r.id}')">📋 Copier</button>
-     <button class="cta ghost" onclick="emailReport('${r.id}')">✉️ Préparer l'email</button></div>`);
+     <button class="cta ghost" onclick="emailReport('${r.id}')">✉️ Email</button>
+     <button class="cta ghost" onclick="editReport('${r.id}')">✎ Éditer</button></div>`);
 }
-function reportHtml(r){ const body=esc(r.content).replace(/\n/g,"<br>");
+function editReport(id){ const r=(DB.reports||[]).find(x=>x.id===id); if(!r) return;
+  openModal(`<span class="close" onclick="closeModal()">✕</span><h2>✎ ${esc(r.title)}</h2>
+   <div class="msub">Ajuste librement le contenu. Format : # Titre · ## Section · - puce · **gras**.</div>
+   <textarea id="rep-edit" rows="20" style="width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;line-height:1.5">${esc(r.content)}</textarea>
+   <div style="display:flex;gap:8px;margin-top:10px"><button class="cta" onclick="saveReportEdit('${r.id}')">💾 Enregistrer</button><button class="cta ghost" onclick="openReport('${r.id}')">Annuler</button></div>`);
+}
+function saveReportEdit(id){ const r=(DB.reports||[]).find(x=>x.id===id); if(!r) return; r.content=val("rep-edit"); r.edited=true; save(); openReport(id); toast("Rapport mis à jour."); }
+function reportHtml(r){
   return "<!doctype html><html><head><meta charset=\"utf-8\"><title>"+esc(r.title)+"</title><style>"
-   +"body{font-family:Georgia,'Times New Roman',serif;color:#1A1A1A;max-width:800px;margin:24px auto;padding:0 24px;line-height:1.55}"
-   +".h{border-bottom:3px solid #B5923A;padding-bottom:10px;margin-bottom:16px}.h .b{color:#0D1F45;font-weight:700;font-size:20px}"
-   +".h .m{color:#6B7280;font-size:12px;margin-top:4px}.tag{display:inline-block;background:#0D1F45;color:#fff;padding:2px 8px;border-radius:4px;font-size:11px}</style></head><body>"
+   +"body{font-family:Georgia,'Times New Roman',serif;color:#1A1A1A;max-width:820px;margin:24px auto;padding:0 26px;line-height:1.6}"
+   +".h{border-bottom:3px solid #B5923A;padding-bottom:10px;margin-bottom:18px}.h .b{color:#0D1F45;font-weight:700;font-size:21px}"
+   +".h .m{color:#6B7280;font-size:12px;margin-top:4px}.tag{display:inline-block;background:#0D1F45;color:#fff;padding:2px 8px;border-radius:4px;font-size:11px}"
+   +"h1{color:#0D1F45;font-size:20px;margin:16px 0 8px}h2{color:#0D1F45;font-size:15px;border-bottom:1px solid #e5e0d5;padding-bottom:4px;margin:22px 0 8px}h3{color:#B5923A;font-size:13px;margin:14px 0 6px}"
+   +"ul,ol{margin:6px 0 6px 22px}li{margin:3px 0}p{margin:7px 0}strong{color:#0D1F45}hr{border:none;border-top:1px solid #e5e0d5;margin:14px 0}"
+   +"</style></head><body>"
    +"<div class=\"h\"><div class=\"b\">"+esc(DB.meta.cabinetName||"BSM Advisory & Consulting")+"</div>"
-   +"<div class=\"m\"><span class=\"tag\">"+esc(r.typeLabel||reportTypeLabel(r.type))+"</span> · "+esc(r.title)+" · Édité le "+esc(frDate(r.ts.slice(0,10)))+" · Confidentialité : "+esc(r.classification||"confidentiel")+"</div></div>"
-   +"<div>"+body+"</div></body></html>"; }
+   +"<div class=\"m\"><span class=\"tag\">"+esc(r.typeLabel||reportTypeLabel(r.type))+"</span> · Édité le "+esc(frDate(r.ts.slice(0,10)))+" · Confidentialité : "+esc(r.classification||"confidentiel")+"</div></div>"
+   +mdToHtml(r.content)+"</body></html>"; }
 function printReportPDF(id){ const r=(DB.reports||[]).find(x=>x.id===id); if(!r) return; openPrintable(reportHtml(r)); }
 function copyReport(id){ const r=(DB.reports||[]).find(x=>x.id===id); if(!r) return; const txt=r.title+"\n\n"+r.content;
   if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(function(){toast("Rapport copié — colle-le dans ton mail.");},function(){toast("Copie impossible.");}); }
