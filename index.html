@@ -770,6 +770,63 @@ async function cloudUiLoad(){
   });
 }
 
+/* ----------------------------- Sauvegardes automatiques cloud (Supabase) -----------------------------
+   Filet de sécurité contre la perte de données : une sauvegarde quotidienne (02:00 UTC) est faite
+   côté Supabase (pg_cron → make_backup), + sauvegarde manuelle + téléchargement hors-site + restauration.
+   Accès réservé direction/admin (RLS). Voir supabase/migrations/0002_backups.sql. */
+async function refreshBackupsPanel(){
+  const el=document.getElementById("backups-panel"); if(!el) return;
+  if(!cloudPrimary){ el.innerHTML=`<div class="hint">Connecte-toi au Cloud pour gérer les sauvegardes automatiques.</div>`; return; }
+  if(typeof isDirection==="function" && !isDirection()){ el.innerHTML=`<div class="hint">Réservé à la direction et à l'administration.</div>`; return; }
+  el.innerHTML=`<div class="hint">Chargement des sauvegardes…</div>`;
+  let c; try{ c=await sbClient(); }catch(e){ el.innerHTML=`<div class="hint" style="color:var(--orange)">Cloud indisponible.</div>`; return; }
+  const { data, error } = await c.from("backups").select("id,created_at,kind,record_count").order("created_at",{ascending:false}).limit(60);
+  if(error){ el.innerHTML=`<div class="hint" style="color:var(--red)">Erreur : ${esc(error.message)}<br><span style="color:var(--muted)">As-tu bien exécuté la migration 0002_backups.sql ?</span></div>`; return; }
+  const rows=(data||[]).map(b=>{
+    const d=new Date(b.created_at).toLocaleString("fr-FR",{dateStyle:"short",timeStyle:"short"});
+    const badge=b.kind==="manuel"?'<span class="badge b-grey">manuel</span>':'<span class="badge b-green">auto</span>';
+    return `<tr><td>${d}</td><td>${badge}</td><td style="text-align:right">${b.record_count}</td>
+      <td style="white-space:nowrap">
+        <button class="cta ghost sm" onclick="cloudBackupDownload('${b.id}')" title="Télécharger cette sauvegarde en fichier JSON (copie hors-site)">⬇</button>
+        <button class="cta ghost sm" onclick="cloudBackupRestore('${b.id}')" title="Réinjecter les données de cette sauvegarde">↺</button>
+      </td></tr>`;
+  }).join("");
+  el.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+      <div class="hint" style="margin:0">Sauvegarde quotidienne automatique côté Supabase (02:00 UTC = 05:00 à Tana). Les 30 dernières auto sont conservées + toutes les manuelles.</div>
+      <button class="cta sm" onclick="cloudBackupNow()">📦 Sauvegarder maintenant</button></div>
+    <table><thead><tr><th>Date</th><th>Type</th><th style="text-align:right">Enreg.</th><th>Actions</th></tr></thead><tbody>${rows||'<tr><td colspan="4"><div class="empty">Aucune sauvegarde encore. Clique « Sauvegarder maintenant » ou attends la tournée automatique.</div></td></tr>'}</tbody></table>
+    <div class="hint" style="margin-top:6px">💡 Télécharge (⬇) régulièrement une sauvegarde et garde-la ailleurs (disque externe / cloud perso) = vraie copie hors-site.</div>`;
+}
+async function cloudBackupNow(){
+  try{ const c=await sbClient(); const { error }=await c.rpc("backup_now");
+    if(error){ toast("Erreur : "+error.message); return; }
+    toast("Sauvegarde créée."); refreshBackupsPanel(); }
+  catch(e){ toast("Cloud indisponible."); }
+}
+async function cloudBackupDownload(id){
+  try{ const c=await sbClient(); const { data, error }=await c.from("backups").select("created_at,payload").eq("id",id).single();
+    if(error||!data){ toast("Téléchargement impossible."); return; }
+    const blob=new Blob([JSON.stringify(data.payload,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob), a=document.createElement("a");
+    a.href=url; a.download="BSM_sauvegarde_"+String(data.created_at||"").slice(0,10)+".json"; a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1500); toast("Sauvegarde téléchargée."); }
+  catch(e){ toast("Cloud indisponible."); }
+}
+async function cloudBackupRestore(id){
+  confirmModal("Restaurer cette sauvegarde ?","Les données de cette sauvegarde sont réinjectées (sur ce poste et dans le cloud). Fais d'abord une sauvegarde de l'état actuel par sécurité.", async ()=>{
+    try{ const c=await sbClient(); const { data, error }=await c.from("backups").select("payload").eq("id",id).single();
+      if(error||!data){ toast("Restauration impossible."); return; }
+      const grouped={}; (data.payload||[]).forEach(r=>{ (grouped[r.collection]=grouped[r.collection]||[]).push(r.data); });
+      CLOUD_COLLECTIONS.forEach(col=>{ DB[col]=grouped[col]||[]; });
+      snapshotFromLocal(); save();
+      setCloudSyncStatus("syncing");
+      try{ await cloudImportLocal(); setCloudSyncStatus("ok"); }catch(e){ setCloudSyncStatus("error"); }
+      refreshAll(); toast("Sauvegarde restaurée."); }
+    catch(e){ toast("Cloud indisponible."); }
+  });
+}
+
 /* ----------------------------- Synchronisation serveur local (Bloc 2A) ----------------------------- */
 /* L'app marche toujours en local (localStorage). Si un serveur BSM local est présent
    (app ouverte via http://…:3000), les données sont partagées + sauvegardées automatiquement.
@@ -3588,10 +3645,13 @@ function openSettings(){
     <div class="field"><label>☁️ Cloud Supabase (bêta) — synchronisation sécurisée multi-organisation</label>
       <div id="cloud-panel"><div class="hint">…</div></div></div>
     <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+    <div class="field"><label>💾 Sauvegardes automatiques (Cloud)</label>
+      <div id="backups-panel"><div class="hint">…</div></div></div>
+    <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
     <div class="field"><label style="color:var(--red)">Zone sensible</label>
       <button class="cta danger sm" onclick="resetData()">Réinitialiser toutes les données</button></div>
     <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Fermer</button><button class="cta" onclick="saveSettings()">Enregistrer</button></div>`);
-  refreshCloudPanel();
+  refreshCloudPanel(); refreshBackupsPanel();
 }
 function curSym(c){ return c==="MGA"?"Ar":(c==="USD"?"$":"€"); }
 function curIndicatorText(){ const d=DB.meta.defaultCurrency; return curSym(d)+" · "+CURRENCIES.map(c=>c[0]).filter(c=>c!==d).map(curSym).join(" · "); }
