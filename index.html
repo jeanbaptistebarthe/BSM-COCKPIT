@@ -279,6 +279,7 @@
     <div class="navitem" data-scr="resultat" onclick="setScreen('resultat')"><span class="ic">🧾</span><span class="lbl">Compte de résultat</span></div>
     <div class="navitem" data-scr="roi" onclick="setScreen('roi')"><span class="ic">📊</span><span class="lbl">ROI & Investissements</span></div>
     <div class="navitem" data-scr="monitoring" onclick="setScreen('monitoring')"><span class="ic">🩺</span><span class="lbl">Monitoring & suivi</span></div>
+    <div class="navitem" data-scr="aireport" onclick="setScreen('aireport')"><span class="ic">🤖</span><span class="lbl">Reporting IA</span></div>
     <div class="navgroup">MÉTHODE R5®</div>
     <div class="navitem" data-scr="missions" onclick="setScreen('missions')"><span class="ic">🎯</span><span class="lbl">Missions</span></div>
     <div class="navitem" data-scr="risks" onclick="setScreen('risks')"><span class="ic">⚠️</span><span class="lbl">Matrice des risques</span></div>
@@ -305,6 +306,7 @@
     <div class="screen" id="scr-ca"></div>
     <div class="screen" id="scr-resultat"></div>
     <div class="screen" id="scr-roi"></div>
+    <div class="screen" id="scr-aireport"></div>
     <div class="screen" id="scr-monitoring"></div>
     <div class="screen" id="scr-missions"></div>
     <div class="screen" id="scr-risks"></div>
@@ -367,14 +369,14 @@ const STORE_KEY = "bsm_cockpit_v1";
 const PAYMENT_METHODS = ["CB","Chèque","Mvola","Orange Money","Espèces","Virement"];
 const SECTORS = ["Industrie / Distribution","Banque / Finance","Énergie","Aéroportuaire","Télécom","Public / Institutionnel","Santé","Autre"];
 const CAT_IN  = ["Honoraires mission","Abonnement annuel","Diagnostic / Audit","Formation","Veille / Abonnement","Autre"];
-const CAT_OUT = ["Salaires","Primes & indemnités","Loyer","Charges & taxes","Achat matériel","Mobilier","Fournitures","Essence / Carburant","Déplacement","Logement","Repas / Restauration","Frais annexes","Marketing","Sous-traitance","Investissement","Dons","Autre"];
+const CAT_OUT = ["Salaires","Primes & indemnités","Loyer","Charges & taxes","Achat matériel","Mobilier","Fournitures","Essence / Carburant","Déplacement","Logement","Repas / Restauration","Frais annexes","Marketing","Sous-traitance","Intelligence artificielle","Investissement","Dons","Autre"];
 // Regroupement des dépenses internes (affichage budget + différenciation compte de résultat)
 const EXPENSE_GROUPS=[
   {name:"Personnel",              cats:["Salaires","Primes & indemnités"]},
   {name:"Charges fixes & taxes",  cats:["Loyer","Charges & taxes"]},
   {name:"Équipement & fournitures",cats:["Achat matériel","Mobilier","Fournitures"]},
   {name:"Frais de mission & déplacements", cats:["Essence / Carburant","Déplacement","Logement","Repas / Restauration","Frais annexes"]},
-  {name:"Services externes",      cats:["Marketing","Sous-traitance"]},
+  {name:"Services externes",      cats:["Marketing","Sous-traitance","Intelligence artificielle"]},
   {name:"Investissement & dons",  cats:["Investissement","Dons"]},
   {name:"Autre",                  cats:["Autre"]}
 ];
@@ -459,7 +461,7 @@ function load(){
   DB.recurring=DB.recurring||[]; DB.jobs=DB.jobs||[]; DB.primes=DB.primes||[]; DB.devis=DB.devis||[];
   DB.users=DB.users||[]; DB.activityLog=DB.activityLog||[]; DB.notifications=DB.notifications||[]; DB.moneyRequests=DB.moneyRequests||[]; DB.investments=DB.investments||[]; DB.decisions=DB.decisions||[];
   DB.a1vehicles=DB.a1vehicles||[]; DB.a1logs=DB.a1logs||[]; DB.a1offers=DB.a1offers||[];
-  DB.docTemplates=DB.docTemplates||[]; DB.clientDocs=DB.clientDocs||[];
+  DB.docTemplates=DB.docTemplates||[]; DB.clientDocs=DB.clientDocs||[]; DB.aiUsage=DB.aiUsage||[];
   if(!DB.catalog) DB.catalog=defaultCatalog();
   if(!DB.meta.deck) DB.meta.deck=defaultDeck();
   DB.users.forEach(ensureUserPerms); // matérialise les permissions (migration des comptes existants)
@@ -551,7 +553,7 @@ function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); serverPush
    La clé "publishable" est PUBLIQUE par nature — l'accès aux données est verrouillé par la RLS (isolation par organisation). */
 const SB_URL = "https://fxaeeplylyeitukctlph.supabase.co";
 const SB_KEY = "sb_publishable_SrXvreUFVJgLLBi6PLvA-g_ARBg2SST";
-const CLOUD_COLLECTIONS = ["clients","events","transactions","missions","risks","recommendations","employees","recruitments","leaves","activities","documents","playbooks","recurring","jobs","primes","devis","moneyRequests","investments","decisions","a1vehicles","a1logs","a1offers","docTemplates","clientDocs"];
+const CLOUD_COLLECTIONS = ["clients","events","transactions","missions","risks","recommendations","employees","recruitments","leaves","activities","documents","playbooks","recurring","jobs","primes","devis","moneyRequests","investments","decisions","a1vehicles","a1logs","a1offers","docTemplates","clientDocs","aiUsage"];
 let _sb=null, cloudOrgId=null, cloudPrimary=false, _cloudTimer=null;
 /* Snapshot des identifiants déjà poussés PAR CE POSTE, par collection.
    Sert à propager les suppressions SANS jamais effacer ce qu'un AUTRE poste aurait ajouté
@@ -995,7 +997,7 @@ function setScreen(name){
 }
 function renderScreen(name){
   ({dashboard:renderDashboard, clients:renderClients, agenda:renderAgenda,
-    budget:renderBudget, ca:renderCA, resultat:renderResultat, roi:renderROI, monitoring:renderMonitoring, missions:renderMissions, risks:renderRisks,
+    budget:renderBudget, ca:renderCA, resultat:renderResultat, roi:renderROI, aireport:renderAireport, monitoring:renderMonitoring, missions:renderMissions, risks:renderRisks,
     carto:renderCarto, recos:renderRecos, rh:renderRH, audit:renderAudit, "a1fleet":renderA1Fleet,
     commercial:renderCommercial, documentation:renderDocumentation, fiches:renderFiches, clientfiche:renderClientFiche, analyses:renderAnalyses,
     "admin-users":renderAdminUsers, "admin-log":renderAdminLog}[name]||(()=>{}))();
@@ -3616,10 +3618,15 @@ function openSettings(){
         <input id="s-id-stat" value="${esc(docIdentity().stat)}" placeholder="STAT">
       </div></div>
     <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
-    <div class="field"><label>Assistant IA — Clé API Mistral</label><input id="s-mistral" value="${esc(DB.meta.mistralKey||'')}" placeholder="Colle ta clé Mistral"></div>
-    <div class="field"><label>Modèle IA</label><select id="s-aimodel">
+    <div class="field"><label>Assistant IA — Clé API Mammouth <span style="color:var(--gold)">(passerelle multi-modèles, prioritaire)</span></label><input id="s-mammouth" type="password" value="${esc(DB.meta.mammouthKey||'')}" placeholder="Colle ta clé Mammouth (sk-…)"></div>
+    <div class="field"><label>Modèle Mammouth</label><select id="s-aimodel-mam">
+      ${AI_MODELS_MAMMOUTH.map(m=>`<option value="${m}" ${(DB.meta.aiModelMammouth||'mammouth-recommended')===m?'selected':''}>${m}</option>`).join("")}</select></div>
+    <div class="hint">Si une clé Mammouth est saisie, elle est utilisée en priorité (sinon repli sur Mistral ci-dessous). Chaque appel est compté (tokens + coût estimé) → onglet <b>Reporting IA</b>, et alimente automatiquement la ligne budget « Intelligence artificielle ». ⚠️ Pense à allouer un budget à ta clé dans ton compte Mammouth.</div>
+    <hr style="border:none;border-top:1px dashed var(--line);margin:12px 0">
+    <div class="field"><label>Assistant IA — Clé API Mistral <span style="color:var(--muted)">(repli)</span></label><input id="s-mistral" type="password" value="${esc(DB.meta.mistralKey||'')}" placeholder="Colle ta clé Mistral"></div>
+    <div class="field"><label>Modèle Mistral</label><select id="s-aimodel">
       ${[["mistral-small-latest","Mistral Small (rapide / éco)"],["mistral-medium-latest","Mistral Medium"],["mistral-large-latest","Mistral Large (recommandé)"]].map(m=>`<option value="${m[0]}" ${(DB.meta.aiModel||'mistral-large-latest')===m[0]?'selected':''}>${m[1]}</option>`).join("")}</select></div>
-    <div class="hint">Clé stockée localement, jamais publiée. Active l'assistant IA (onglet Analyses & fiches client). Les données envoyées à Mistral servent uniquement à générer les conseils.</div>
+    <div class="hint">Clés stockées localement, jamais publiées. Les données envoyées à l'IA servent uniquement à générer les conseils.</div>
     <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
     <div class="field"><label>Intégrations Google (Sheet R5 · Agenda · e-mail)</label>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -3661,6 +3668,7 @@ function saveSettings(){
   const ru=parseFloat(val("s-rateusd")); DB.meta.rateUsdMga=(!isNaN(ru)&&ru>0)?ru:DB.meta.rateUsdMga;
   DB.meta.cabinetName=val("s-cabinet");
   DB.meta.mistralKey=val("s-mistral"); DB.meta.aiModel=val("s-aimodel");
+  DB.meta.mammouthKey=val("s-mammouth").trim(); DB.meta.aiModelMammouth=val("s-aimodel-mam");
   DB.meta.reportEmail=val("s-reportmail").trim();
   const rm=parseInt(val("s-reviewmonths")); if([3,6,12].includes(rm)) DB.meta.reviewMonths=rm;
   DB.meta.identity={ nom:val("s-id-nom").trim(), titre:val("s-id-titre").trim(), rs:val("s-id-rs").trim(),
@@ -4644,7 +4652,7 @@ async function a1Analyze(){
   openModal(`<span class="close" onclick="closeModal()">✕</span><h2>🤖 Analyse IA — Flotte & carburant</h2><div id="a1-ai" class="msub">Analyse en cours…</div>`);
   try{
     const sys="Tu es un analyste flotte & énergie pour un cabinet de conseil à Madagascar. À partir des données, identifie : surconsommations et causes probables (conduite, entretien, vol de carburant), véhicules les plus coûteux, temps de ralenti excessif, et donne des recommandations concrètes, chiffrées et hiérarchisées. Termine par 3 actions prioritaires. Sois concret et bref.";
-    const txt=await aiChat(sys, buildA1Context(), 900);
+    const txt=await aiChat(sys, buildA1Context(), 900, "a1");
     const el=document.getElementById("a1-ai"); if(el){ el.className=""; el.style.whiteSpace="pre-wrap"; el.style.fontSize="13px"; el.style.lineHeight="1.55"; el.textContent=txt; }
   }catch(e){ const el=document.getElementById("a1-ai"); if(el) el.innerHTML=`<span style="color:var(--red)">${esc(e.message||"Erreur IA")}. Vérifiez la clé Mistral dans ⚙ Paramètres.</span>`; }
 }
@@ -4965,18 +4973,29 @@ function printPortfolioReport(){
   window.print();
 }
 
-/* ----------------------------- IA générative (Mistral) ----------------------------- */
+/* ----------------------------- IA générative (Mammouth / Mistral) -----------------------------
+   Les deux fournisseurs sont compatibles OpenAI et renvoient un objet `usage` (tokens) → on route
+   via une fonction unique et on COMPTE chaque appel (tokens + coût estimé) pour le reporting + budget.
+   Mammouth (passerelle multi-modèles) est prioritaire s'il est configuré. Clé JAMAIS dans le code. */
 let lastAIAdvice="";
-async function aiComplete(messages, maxTokens){
-  const key=(DB.meta.mistralKey||"").trim();
-  if(!key||key.length<10) throw new Error("Clé API Mistral non configurée — ouvre ⚙ Paramètres pour la saisir.");
-  const resp=await fetch("https://api.mistral.ai/v1/chat/completions",{
+function aiProviderConf(){
+  const mam=(DB.meta.mammouthKey||"").trim(), mis=(DB.meta.mistralKey||"").trim();
+  if(mam.length>=10) return { name:"mammouth", url:"https://api.mammouth.ai/v1/chat/completions", key:mam, model:DB.meta.aiModelMammouth||"mammouth-recommended" };
+  if(mis.length>=10) return { name:"mistral", url:"https://api.mistral.ai/v1/chat/completions", key:mis, model:DB.meta.aiModel||"mistral-large-latest" };
+  return null;
+}
+async function aiComplete(messages, maxTokens, sector){
+  const p=aiProviderConf();
+  if(!p) throw new Error("Aucune clé API IA configurée — ouvre ⚙ Paramètres (Mammouth ou Mistral).");
+  const resp=await fetch(p.url,{
     method:"POST",
-    headers:{"Content-Type":"application/json","Authorization":"Bearer "+key},
-    body:JSON.stringify({model:DB.meta.aiModel||"mistral-large-latest",max_tokens:maxTokens||900,messages:messages})
+    headers:{"Content-Type":"application/json","Authorization":"Bearer "+p.key},
+    body:JSON.stringify({model:p.model,max_tokens:maxTokens||900,messages:messages})
   });
   if(!resp.ok){ let e={}; try{e=await resp.json();}catch(_){} throw new Error((e.error&&e.error.message)||e.message||(typeof e.detail==="string"?e.detail:"")||"Erreur API "+resp.status); }
-  const data=await resp.json(); return data.choices[0].message.content;
+  const data=await resp.json();
+  try{ recordAiUsage(p.name, data.model||p.model, data.usage, sector); }catch(_){}   // comptage (ne bloque jamais la réponse)
+  return data.choices[0].message.content;
 }
 function memoryHint(){
   const mem=DB.aiMemory||[], conseils=DB.advice.custom||[];
@@ -4985,8 +5004,106 @@ function memoryHint(){
   if(conseils.length) h+="\nStyle des conseils déjà validés par l'utilisateur : "+conseils.slice(-6).map(c=>(c.text||"").slice(0,120)).join(" | ");
   return h?("\n"+h):"";
 }
-async function aiChat(system, user, maxTokens){
-  return aiComplete([{role:"system",content:system+memoryHint()},{role:"user",content:user}], maxTokens);
+async function aiChat(system, user, maxTokens, sector){
+  return aiComplete([{role:"system",content:system+memoryHint()},{role:"user",content:user}], maxTokens, sector);
+}
+/* ---- Métrologie IA : comptage tokens + coût estimé + report automatique au budget ---- */
+const AI_MODELS_MAMMOUTH=["mammouth-recommended","gpt-5.5","gpt-5.4","gpt-5.4-mini","claude-opus-4.7","mistral-medium-3.1","gemini-3.1-flash-preview","llama-4-maverick","deepseek-v4-flash"];
+const AI_SECTOR_LABELS={ conseils:"Conseils portefeuille", "client-advice":"Conseil client (fiche 360°)", "qa":"Questions / réponses", "a1":"Programme A1 (flotte)", reporting:"Reporting", autre:"Autre" };
+function defaultAiPrices(){ // $ par 1 MILLION de tokens {in,out} — ESTIMATION éditable (Mammouth ne renvoie pas le coût)
+  return { "mammouth-recommended":{in:2,out:8}, "gpt-5.5":{in:5,out:15}, "gpt-5.4":{in:2.5,out:10}, "gpt-5.4-mini":{in:0.4,out:1.6},
+    "claude-opus-4.7":{in:5,out:25}, "mistral-medium-3.1":{in:0.4,out:2}, "gemini-3.1-flash-preview":{in:0.3,out:2.5},
+    "llama-4-maverick":{in:0.2,out:0.6}, "deepseek-v4-flash":{in:0.3,out:1.2}, "mistral-large-latest":{in:2,out:6}, "_default":{in:2,out:8} };
+}
+function aiPrices(){ return Object.assign({}, defaultAiPrices(), DB.meta.aiPrices||{}); }
+function aiPrice(model){ const p=aiPrices(); return p[model]||p["_default"]||{in:2,out:8}; }
+function aiCostUsd(model, pin, pout){ const pr=aiPrice(model); return (pin/1e6)*pr.in + (pout/1e6)*pr.out; }
+function recordAiUsage(provider, model, usage, sector){
+  const pin=(usage&&usage.prompt_tokens)||0, pout=(usage&&usage.completion_tokens)||0;
+  if(!Array.isArray(DB.aiUsage)) DB.aiUsage=[];
+  DB.aiUsage.push({ id:uid(), ts:new Date().toISOString(), user:(currentUser&&currentUser.login)||"", userId:(currentUser&&currentUser.id)||"",
+    sector:sector||"autre", provider:provider||"", model:model||"", promptTokens:pin, completionTokens:pout, totalTokens:pin+pout, costUsd:aiCostUsd(model,pin,pout) });
+  if(DB.aiUsage.length>5000) DB.aiUsage=DB.aiUsage.slice(-5000);
+  aiSyncBudgetDebounced(); save();
+}
+let _aiBudgetTimer=null;
+function aiSyncBudgetDebounced(){ if(_aiBudgetTimer) clearTimeout(_aiBudgetTimer); _aiBudgetTimer=setTimeout(aiSyncBudget,1500); }
+/* Agrège le coût IA par mois et upsert UNE transaction "Dépenses IA" par mois (id stable → pas de doublon).
+   Ces lignes alimentent automatiquement Budget / CA / Compte de résultat (catégorie Intelligence artificielle). */
+function aiSyncBudget(){
+  const byMonth={}; (DB.aiUsage||[]).forEach(u=>{ const m=(u.ts||"").slice(0,7); if(m) byMonth[m]=(byMonth[m]||0)+(u.costUsd||0); });
+  const entity="bsmac";
+  Object.keys(byMonth).forEach(m=>{
+    const amount=Math.round(byMonth[m]*10000)/10000; const id="aiusage-"+entity+"-"+m; const dateISO=m+"-01";
+    let t=DB.transactions.find(x=>x.id===id);
+    if(!t){ if(amount<=0) return; t={ id:id, sens:"sortant", label:"Dépenses IA (usage) — "+m, currency:"USD", category:"Intelligence artificielle",
+      clientId:"", entity:entity, nature:"prestataire", status:"realise", method:"", date:dateISO, dueDate:dateISO, aiAuto:true }; DB.transactions.push(t); }
+    t.amount=amount; t.aiAuto=true;
+  });
+  save();
+}
+/* ---- Reporting IA : le « travail de fond » — ventile l'usage (secteur/modèle/utilisateur/mois) + coût pour chiffrer le budget ---- */
+function aiPeriodCutoff(){ const p=window.aiPeriod||"month";
+  if(p==="all") return 0;
+  if(p==="30") return Date.now()-30*86400000;
+  const d=new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).getTime(); }
+function aiUsageFiltered(){ const cut=aiPeriodCutoff(); return (DB.aiUsage||[]).filter(u=>new Date(u.ts).getTime()>=cut); }
+function aiSetPeriod(p){ window.aiPeriod=p; renderAireport(); }
+function usdToAr(u){ return Math.round((u||0)*(DB.meta.rateUsdMga||4500)); }
+function aiSectorLabel(s){ return AI_SECTOR_LABELS[s]||s||"—"; }
+function aiGroupBy(list, keyFn){ const g={}; list.forEach(u=>{ const k=keyFn(u)||"—"; if(!g[k]) g[k]={calls:0,tok:0,cost:0}; g[k].calls++; g[k].tok+=(u.totalTokens||0); g[k].cost+=(u.costUsd||0); }); return g; }
+function aiGroupRows(g, labelFn){ return Object.keys(g).sort((a,b)=>g[b].cost-g[a].cost).map(k=>{ const x=g[k];
+  return `<tr><td><b>${esc(labelFn?labelFn(k):k)}</b></td><td style="text-align:right">${x.calls}</td><td style="text-align:right">${x.tok.toLocaleString("fr-FR")}</td><td style="text-align:right">$${x.cost.toFixed(4)}</td><td style="text-align:right;color:var(--muted)">${usdToAr(x.cost).toLocaleString("fr-FR")} Ar</td></tr>`; }).join(""); }
+function aiSavePrices(){ const p=Object.assign({}, aiPrices());
+  AI_MODELS_MAMMOUTH.concat(["mistral-large-latest"]).forEach(m=>{ const inn=parseFloat(val("aip-in-"+m)), out=parseFloat(val("aip-out-"+m));
+    if(!isNaN(inn)&&!isNaN(out)) p[m]={in:inn,out:out}; });
+  delete p._default_placeholder; DB.meta.aiPrices=p; save(); aiSyncBudget(); toast("Grille de prix enregistrée — budget recalculé."); renderAireport(); }
+function renderAireport(){
+  const host=document.getElementById("scr-aireport"); if(!host) return;
+  if(!(isAdmin()||can("aireport"))){ host.innerHTML=""; return; }
+  const period=window.aiPeriod||"month";
+  const list=aiUsageFiltered();
+  const totCalls=list.length, totTok=list.reduce((s,u)=>s+(u.totalTokens||0),0), totCost=list.reduce((s,u)=>s+(u.costUsd||0),0);
+  const thisMonth=(new Date()).toISOString().slice(0,7);
+  const monthCost=(DB.aiUsage||[]).filter(u=>(u.ts||"").slice(0,7)===thisMonth).reduce((s,u)=>s+(u.costUsd||0),0);
+  const prov=aiProviderConf();
+  const chip=(p,l)=>`<button class="cta sm ${period===p?'':'ghost'}" onclick="aiSetPeriod('${p}')">${l}</button>`;
+  const bySector=aiGroupBy(list,u=>u.sector), byModel=aiGroupBy(list,u=>u.model), byUser=aiGroupBy(list,u=>u.user||"—");
+  const byMonth={}; (DB.aiUsage||[]).forEach(u=>{ const m=(u.ts||"").slice(0,7); if(!m)return; if(!byMonth[m])byMonth[m]={calls:0,tok:0,cost:0}; byMonth[m].calls++; byMonth[m].tok+=(u.totalTokens||0); byMonth[m].cost+=(u.costUsd||0); });
+  const monthRows=Object.keys(byMonth).sort().reverse().map(m=>`<tr><td><b>${m}</b></td><td style="text-align:right">${byMonth[m].calls}</td><td style="text-align:right">${byMonth[m].tok.toLocaleString("fr-FR")}</td><td style="text-align:right">$${byMonth[m].cost.toFixed(4)}</td><td style="text-align:right;color:var(--muted)">${usdToAr(byMonth[m].cost).toLocaleString("fr-FR")} Ar</td></tr>`).join("");
+  const prices=aiPrices();
+  const priceRows=AI_MODELS_MAMMOUTH.concat(["mistral-large-latest"]).map(m=>{ const pr=prices[m]||prices._default;
+    return `<tr><td>${esc(m)}</td>
+      <td><input id="aip-in-${m}" type="number" step="0.01" value="${pr.in}" style="width:80px;padding:4px 6px;border:1px solid var(--line);border-radius:5px"></td>
+      <td><input id="aip-out-${m}" type="number" step="0.01" value="${pr.out}" style="width:80px;padding:4px 6px;border:1px solid var(--line);border-radius:5px"></td></tr>`; }).join("");
+  const th=`<thead><tr><th>Nom</th><th style="text-align:right">Appels</th><th style="text-align:right">Tokens</th><th style="text-align:right">Coût est.</th><th style="text-align:right">≈ Ariary</th></tr></thead>`;
+  host.innerHTML=`
+    <div class="pagetitle"><div><h1>Reporting IA</h1><div class="sub">Usage, consommation et coût estimé des requêtes IA — pour chiffrer le budget</div></div>
+      <div style="display:flex;gap:8px">${chip('month',"Ce mois-ci")}${chip('30',"30 jours")}${chip('all',"Tout")}</div></div>
+    <div class="card" style="border-left:3px solid ${prov?'var(--green)':'var(--orange)'}">
+      ${prov?`<b>Fournisseur actif :</b> ${prov.name==='mammouth'?'☁️ Mammouth':'Mistral'} · modèle par défaut <b>${esc(prov.model)}</b>.`
+             :`⚠️ Aucune clé IA configurée — <a href="#" onclick="openSettings();return false">ouvrir les Paramètres</a>. Le comptage démarrera dès le 1er appel.`}
+      <span style="color:var(--muted)"> Les coûts sont <b>estimés</b> (Mammouth ne renvoie pas le coût par appel) via la grille de prix ci-dessous — ajuste-la selon ta facture réelle.</span></div>
+    <div class="kpis">
+      <div class="kpi"><div class="v">${totCalls}</div><div class="l">Appels (${period==='month'?'ce mois':period==='30'?'30 j':'total'})</div></div>
+      <div class="kpi"><div class="v">${totTok.toLocaleString("fr-FR")}</div><div class="l">Tokens consommés</div></div>
+      <div class="kpi"><div class="v">$${totCost.toFixed(2)}</div><div class="l">Coût estimé (période)</div></div>
+      <div class="kpi"><div class="v">$${monthCost.toFixed(2)}</div><div class="l">Coût du mois en cours</div></div>
+    </div>
+    ${!(DB.aiUsage||[]).length?`<div class="card"><div class="empty">Aucun appel IA enregistré pour l'instant. Configure une clé (Paramètres) et utilise l'assistant IA (Analyses, fiches client, programme A1) — chaque appel apparaîtra ici et alimentera le budget.</div></div>`:`
+    <div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="card"><h2>Par secteur (type de requête)</h2><table>${th}<tbody>${aiGroupRows(bySector,aiSectorLabel)||'<tr><td colspan="5"><div class="empty">—</div></td></tr>'}</tbody></table></div>
+      <div class="card"><h2>Par modèle</h2><table>${th}<tbody>${aiGroupRows(byModel)||'<tr><td colspan="5"><div class="empty">—</div></td></tr>'}</tbody></table></div>
+      <div class="card"><h2>Par utilisateur</h2><table>${th}<tbody>${aiGroupRows(byUser)||'<tr><td colspan="5"><div class="empty">—</div></td></tr>'}</tbody></table></div>
+      <div class="card"><h2>Par mois</h2><table>${th}<tbody>${monthRows||'<tr><td colspan="5"><div class="empty">—</div></td></tr>'}</tbody></table></div>
+    </div>`}
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">Grille de prix ($ / 1 million de tokens)</h2>
+        <div style="display:flex;gap:8px"><button class="cta ghost sm" onclick="DB.meta.aiPrices=null;save();aiSyncBudget();renderAireport();toast('Grille remise par défaut.')">↺ Défaut</button><button class="cta sm" onclick="aiSavePrices()">💾 Enregistrer & recalculer</button></div></div>
+      <div class="hint" style="margin:6px 0 8px">Sert à estimer le coût de chaque appel (entrée/sortie). Modifie ces valeurs pour coller à ta facture Mammouth, puis « Enregistrer » — la ligne budget « Intelligence artificielle » est recalculée automatiquement.</div>
+      <table><thead><tr><th>Modèle</th><th>Prix entrée ($/1M)</th><th>Prix sortie ($/1M)</th></tr></thead><tbody>${priceRows}</tbody></table>
+      <div class="hint" style="margin-top:10px">💡 Le coût est reporté chaque mois dans le <b>Budget</b> (catégorie « Intelligence artificielle », entité BSM A&C), donc dans le CA net et le Compte de résultat. <button class="cta ghost sm" onclick="aiSyncBudget();toast('Ligne budget IA recalculée.')">↻ Recalculer la ligne budget maintenant</button></div>
+    </div>`;
 }
 function buildAIContext(){
   const a=agg();
@@ -5029,7 +5146,7 @@ async function aiGenerateAdvice(){
   out.innerHTML=`<div class="hint">Génération en cours…</div>`;
   try{
     const sys="Tu es un consultant senior en gouvernance des risques chez BSM Advisory & Consulting (méthode R5, Madagascar). À partir des données du portefeuille, propose 3 à 5 conseils d'action concrets et priorisés, chacun en 1-2 phrases, orientés décision. Précis et actionnable. Format : liste à puces, sans préambule ni conclusion.";
-    const res=await aiChat(sys, "Données du portefeuille :\n"+buildAIContext());
+    const res=await aiChat(sys, "Données du portefeuille :\n"+buildAIContext(), 900, "conseils");
     lastAIAdvice=res;
     out.innerHTML=`<div class="advice info"><div class="ic">🤖</div><div class="body"><div class="t">Conseils générés par l'IA</div><div class="x" style="white-space:pre-wrap">${esc(res)}</div></div></div>
       <div style="display:flex;gap:8px;margin-top:6px"><button class="cta ghost sm" onclick="aiSaveAdvice()">+ Ajouter aux conseils</button><button class="cta ghost sm" onclick="aiGenerateAdvice()">↻ Régénérer</button></div>`;
@@ -5049,7 +5166,7 @@ async function aiAskQuestion(){
   if(out) out.innerHTML=`<div class="hint">Recherche…</div>`;
   try{
     const sys="Tu es l'assistant analytique de BSM Advisory & Consulting. Réponds à la question uniquement à partir des données fournies. Si l'information n'y figure pas, dis-le clairement. Concis et factuel.";
-    const res=await aiChat(sys, "Données :\n"+buildAIContext()+"\n\nQuestion : "+q, 600);
+    const res=await aiChat(sys, "Données :\n"+buildAIContext()+"\n\nQuestion : "+q, 600, "qa");
     if(out) out.innerHTML=`<div class="advice good"><div class="ic">💬</div><div class="body"><div class="x" style="white-space:pre-wrap">${esc(res)}</div></div></div>`;
   }catch(e){ if(out) out.innerHTML=`<div class="imp-err">⚠ ${esc(e.message)}</div>`; }
   if(btn){ btn.disabled=false; btn.textContent="Demander"; }
@@ -5060,7 +5177,7 @@ async function aiClientAdvice(id){
   openModal(`<span class="close" onclick="closeModal()">✕</span><h2>🤖 Conseil IA — ${esc(c.company)}</h2><div class="msub">Généré à partir des données de ce client.</div><div id="cai-out"><div class="hint">Génération en cours…</div></div>`);
   try{
     const sys="Tu es consultant senior en gouvernance des risques chez BSM Advisory & Consulting (méthode R5). Rédige pour ce client : une synthèse de suivi (2-3 phrases) puis 3 conseils d'action priorisés, concrets et actionnables. Concis, orienté décision, sans préambule.";
-    const res=await aiChat(sys, buildClientContext(c));
+    const res=await aiChat(sys, buildClientContext(c), 900, "client-advice");
     window.__caiRes=res; window.__caiId=id;
     const el=document.getElementById("cai-out");
     if(el) el.innerHTML=`<div style="white-space:pre-wrap;font-size:13.5px;line-height:1.6">${esc(res)}</div>
@@ -5147,6 +5264,7 @@ const PERMSCREENS=[
   {key:"resultat", label:"Compte de résultat",grp:"PILOTAGE",fin:true},
   {key:"roi",      label:"ROI & Investissements",grp:"PILOTAGE",fin:true},
   {key:"monitoring",label:"Monitoring & suivi",grp:"PILOTAGE"},
+  {key:"aireport", label:"Reporting IA",grp:"PILOTAGE",fin:true},
   {key:"missions", label:"Missions (R5)",grp:"MÉTHODE R5"},
   {key:"risks",    label:"Matrice des risques (R5)",grp:"MÉTHODE R5"},
   {key:"carto",    label:"Cartographie (R5)",grp:"MÉTHODE R5"},
@@ -5162,7 +5280,7 @@ function permAll(){ return PERMSCREENS.map(p=>p.key); }
 /* Modèles de rôle = accès par défaut (élargissables ensuite, par utilisateur). clientFinance = voir CA/contrats/devis dans la fiche client. */
 const ROLE_TEMPLATES={
   admin:       { label:"Administrateur", allowed:"*", clientFinance:true },
-  direction:   { label:"Direction",      allowed:["dashboard","clients","agenda","budget","ca","resultat","roi","monitoring","missions","risks","carto","recos","commercial","rh","audit","documentation","fiches","analyses"], clientFinance:true },
+  direction:   { label:"Direction",      allowed:["dashboard","clients","agenda","budget","ca","resultat","roi","aireport","monitoring","missions","risks","carto","recos","commercial","rh","audit","documentation","fiches","analyses"], clientFinance:true },
   analyste:    { label:"Analyste R5",     allowed:["clients","monitoring","missions","risks","carto","recos","audit","documentation","fiches"], clientFinance:false },
   commercial:  { label:"Commercial",      allowed:["clients","agenda","monitoring","commercial","documentation","fiches"], clientFinance:true },
   rh:          { label:"RH",              allowed:["rh","agenda","monitoring","documentation","fiches"], clientFinance:false },
