@@ -257,6 +257,7 @@
     <button class="tb-btn" id="theme-btn" onclick="toggleTheme()" title="Thème clair / sombre">🌙</button>
     <button class="tb-btn" id="logout-btn" onclick="lockPortal()" title="Se déconnecter">🔒</button>
     <span id="server-status" class="tb-btn" style="display:none;align-items:center;gap:4px" title="État de la connexion au serveur BSM"></span>
+    <span id="cloud-status" class="tb-btn" style="display:none;align-items:center;gap:4px" title="État de la synchronisation cloud (Supabase)"></span>
     <span id="currency-indicator" class="tb-btn" onclick="openSettings()" title="Devise & paramètres">Ar / €</span>
     <button class="tb-btn" onclick="exportData()">⬇ Sauvegarde</button>
     <button class="tb-btn" onclick="document.getElementById('import-file').click()">⬆ Restaurer</button>
@@ -552,11 +553,32 @@ const SB_URL = "https://fxaeeplylyeitukctlph.supabase.co";
 const SB_KEY = "sb_publishable_SrXvreUFVJgLLBi6PLvA-g_ARBg2SST";
 const CLOUD_COLLECTIONS = ["clients","events","transactions","missions","risks","recommendations","employees","recruitments","leaves","activities","documents","playbooks","recurring","jobs","primes","devis","moneyRequests","investments","decisions","a1vehicles","a1logs","a1offers","docTemplates","clientDocs"];
 let _sb=null, cloudOrgId=null, cloudPrimary=false, _cloudTimer=null;
+/* Snapshot des identifiants déjà poussés PAR CE POSTE, par collection.
+   Sert à propager les suppressions SANS jamais effacer ce qu'un AUTRE poste aurait ajouté
+   (on ne supprime dans le cloud que ce que ce poste avait lui-même poussé et n'a plus). */
+let _cloudSnap={};
+function recordId(item){ return String((item&&(item.id||item.key))||JSON.stringify(item).slice(0,40)); }
+function snapshotFromLocal(){
+  _cloudSnap={};
+  CLOUD_COLLECTIONS.forEach(col=>{ const arr=Array.isArray(DB[col])?DB[col]:[]; _cloudSnap[col]=new Set(arr.map(recordId)); });
+}
+/* Indicateur visible de l'état de synchro (fini les erreurs avalées en silence). */
+function setCloudSyncStatus(state){
+  const el=document.getElementById("cloud-status"); if(!el) return;
+  if(!cloudPrimary){ el.style.display="none"; return; }
+  el.style.display="inline-flex";
+  if(state==="syncing"){ el.textContent="⏳ Synchro…"; el.title="Envoi des données vers le cloud en cours…"; }
+  else if(state==="error"){ el.textContent="⚠️ Synchro KO"; el.title="La dernière synchronisation cloud a échoué. Tes données restent sur ce poste ; vérifie ta connexion et réessaie (une modification relance la synchro)."; }
+  else { const t=new Date().toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}); el.textContent="✅ Synchro "+t; el.title="Dernière synchronisation cloud réussie à "+t+"."; }
+}
 /* Auto-sync : quand on est connecté via le cloud, chaque enregistrement local est repoussé (débounce). */
 function cloudPush(){
   if(!cloudPrimary || !cloudOrgId) return;
   if(_cloudTimer) clearTimeout(_cloudTimer);
-  _cloudTimer=setTimeout(()=>{ _cloudTimer=null; cloudImportLocal().catch(()=>{}); }, 2500);
+  _cloudTimer=setTimeout(()=>{ _cloudTimer=null;
+    setCloudSyncStatus("syncing");
+    cloudImportLocal().then(()=>setCloudSyncStatus("ok")).catch(()=>setCloudSyncStatus("error"));
+  }, 2500);
 }
 async function sbClient(){
   if(_sb) return _sb;
@@ -578,21 +600,66 @@ async function cloudSignIn(email, pass){
   return { data, error };
 }
 async function cloudSignOut(){ const c=await sbClient(); await c.auth.signOut(); cloudOrgId=null; }
+/* --- Gestion des utilisateurs CLOUD réels (profiles Supabase) : les vrais comptes de connexion --- */
+async function renderCloudUsers(){
+  const el=document.getElementById("cloud-users"); if(!el) return;
+  el.innerHTML=`<div class="hint">Chargement des comptes cloud…</div>`;
+  let c; try{ c=await sbClient(); }catch(e){ el.innerHTML=`<div class="hint" style="color:var(--orange)">Cloud indisponible.</div>`; return; }
+  const { data, error } = await c.from("profiles").select("id,full_name,role,is_active").order("full_name",{nullsFirst:false});
+  if(error){ el.innerHTML=`<div class="hint" style="color:var(--red)">Erreur : ${esc(error.message)}</div>`; return; }
+  const roles=["admin","direction","analyste","commercial","rh","collaborateur"];
+  el.innerHTML=`
+    <table><thead><tr><th>Nom</th><th>Rôle (modifiable)</th><th>État</th></tr></thead><tbody>${
+      (data||[]).map(p=>`<tr>
+        <td><b>${esc(p.full_name||p.id.slice(0,8))}</b>${p.id===(currentUser&&currentUser.id)?' <span class="badge b-green">vous</span>':''}</td>
+        <td><select onchange="cloudSetRole('${p.id}', this.value)" ${p.id===(currentUser&&currentUser.id)?'title="Évite de retirer ton propre accès admin"':''}>${roles.map(r=>`<option value="${r}" ${p.role===r?"selected":""}>${roleLabel(r)}</option>`).join("")}</select></td>
+        <td>${p.is_active===false?'<span class="badge b-red">désactivé</span>':'<span class="badge b-actif">actif</span>'}</td></tr>`).join("")
+      || '<tr><td colspan="3"><div class="empty">Aucun compte cloud.</div></td></tr>'}</tbody></table>
+    <div class="card" style="background:var(--cream);border-left:3px solid var(--gold);margin-top:12px">
+      <b style="font-size:12.5px">➕ Ajouter un utilisateur (ex. un membre de la direction)</b>
+      <ol style="font-size:12px;color:var(--ink);margin:8px 0 0 18px;line-height:1.8">
+        <li>Supabase → <b>Authentication → Add user</b> : email + mot de passe de la personne (coche « Auto Confirm User »).</li>
+        <li>Copie son <b>UID</b>, puis dans <b>SQL Editor</b> exécute (remplace juste l'UID entre les guillemets, <b>sans chevrons</b>) :<br>
+          <code style="font-size:11px;display:block;background:#fff;border:1px solid var(--line);border-radius:6px;padding:6px 8px;margin-top:4px">update public.profiles set organization_id=(select id from public.organizations where name='BSM Advisory &amp; Consulting' limit 1), role='direction' where id='COLLE_UID_ICI';</code></li>
+        <li>Elle se connecte sur le cockpit avec cet email/mot de passe. Le rôle se règle ensuite ici, sans SQL.</li>
+      </ol>
+      <div class="hint" style="margin-top:6px">Pourquoi cette étape manuelle ? Créer un compte = clé secrète, qui ne doit jamais être dans le navigateur. L'ajout « en un clic » depuis l'app viendra avec le backend (Edge Functions).</div>
+    </div>`;
+}
+async function cloudSetRole(id, role){
+  try{ const c=await sbClient(); const { error }=await c.from("profiles").update({role}).eq("id", id);
+    if(error){ toast("Erreur : "+error.message); return; }
+    toast("Rôle mis à jour."); if(id===(currentUser&&currentUser.id)){ toast("Reconnecte-toi pour appliquer ton propre nouveau rôle."); } }
+  catch(e){ toast("Cloud indisponible."); }
+}
 /* Import local → Cloud (upsert par collection, par lots). */
 async function cloudImportLocal(onProgress){
   const c = await sbClient(); if(!cloudOrgId) await cloudLoadProfile();
   if(!cloudOrgId) throw new Error("Profil sans organisation — vérifie le bootstrap.");
   let total=0, done=0; CLOUD_COLLECTIONS.forEach(col=>{ if(Array.isArray(DB[col])) total+=DB[col].length; });
   for(const col of CLOUD_COLLECTIONS){
-    const arr = Array.isArray(DB[col]) ? DB[col] : []; if(!arr.length) continue;
-    const rows = arr.map(item => ({ organization_id:cloudOrgId, collection:col,
-      record_id:String(item.id||item.key||JSON.stringify(item).slice(0,40)), data:item, classification:(item.classification||"interne") }));
+    const arr = Array.isArray(DB[col]) ? DB[col] : [];
+    const localIds = new Set();
+    const rows = arr.map(item => { const rid=recordId(item); localIds.add(rid);
+      return { organization_id:cloudOrgId, collection:col, record_id:rid, data:item, classification:(item.classification||"interne") }; });
+    // (a) Upsert des enregistrements présents en local
     for(let i=0;i<rows.length;i+=200){
       const chunk=rows.slice(i,i+200);
       const { error } = await c.from("records").upsert(chunk, { onConflict:"organization_id,collection,record_id" });
       if(error) throw error;
       done += chunk.length; if(onProgress) onProgress(done,total);
     }
+    // (b) Propagation des suppressions : UNIQUEMENT ce que ce poste avait poussé et n'a plus.
+    //     Un ajout fait sur un autre poste n'est jamais dans _cloudSnap ici → jamais supprimé par erreur.
+    const prev = _cloudSnap[col] || new Set();
+    const toDelete = [...prev].filter(rid => !localIds.has(rid));
+    for(let i=0;i<toDelete.length;i+=200){
+      const dchunk = toDelete.slice(i,i+200);
+      const { error:delErr } = await c.from("records").delete()
+        .eq("organization_id",cloudOrgId).eq("collection",col).in("record_id",dchunk);
+      if(delErr) throw delErr;
+    }
+    _cloudSnap[col] = localIds; // le snapshot de ce poste reflète désormais l'état poussé
   }
   return { total };
 }
@@ -602,18 +669,25 @@ async function cloudPullAll(){
   const { data, error } = await c.from("records").select("collection,record_id,data").limit(10000);
   if(error) throw error;
   const grouped={}; (data||[]).forEach(r=>{ (grouped[r.collection]=grouped[r.collection]||[]).push(r.data); });
-  CLOUD_COLLECTIONS.forEach(col=>{ if(grouped[col]) DB[col]=grouped[col]; });
+  const cloudEmpty = !(data && data.length);
+  // Miroir : une collection absente du cloud est vidée en local — SAUF si le cloud est totalement vide
+  // (évite d'effacer les modèles/exemples par défaut lors d'une toute première connexion sur base neuve).
+  CLOUD_COLLECTIONS.forEach(col=>{ if(grouped[col]) DB[col]=grouped[col]; else if(!cloudEmpty) DB[col]=[]; });
+  snapshotFromLocal();  // le snapshot de ce poste reflète l'état cloud chargé
   save(); return { count:(data||[]).length };
 }
 /* --- Authentification unifiée : Supabase devient la porte d'entrée (repli local toujours dispo) --- */
 function applyCloudUser(session, profile){
+  const orgId=(profile&&profile.organization_id)||null;
+  if(!orgId) return false;   // garde-fou : compte non rattaché à une organisation → on n'entre PAS en mode cloud (évite d'afficher une base vide et de repolluer le cloud)
   const u={ id:session.user.id, name:(profile&&profile.full_name)||session.user.email, login:session.user.email,
-    role:(profile&&profile.role)||"collaborateur", organization_id:(profile&&profile.organization_id)||null };
+    role:(profile&&profile.role)||"collaborateur", organization_id:orgId };
   ensureUserPerms(u);
   currentUser={ id:u.id, name:u.name, login:u.login, role:u.role, allowed:(u.allowed||[]).slice(),
     clientFinance:!!u.clientFinance, source:"cloud", organization_id:u.organization_id };
   cloudOrgId=u.organization_id; cloudPrimary=true;
   localStorage.setItem("bsm_cloud_user", JSON.stringify(currentUser)); // cache pour le mode hors-ligne
+  return true;
 }
 function enterApp(){
   const p=document.getElementById("portal"); if(p) p.classList.remove("show");
@@ -628,9 +702,9 @@ async function cloudPortalLogin(){
   if(res.error){ portalErr("Échec : "+res.error.message); return; }
   const session=await cloudGetSession(); const profile=await cloudLoadProfile();
   if(!profile){ portalErr("Ce compte n'a pas de profil BSM associé."); return; }
-  applyCloudUser(session, profile);
+  if(!applyCloudUser(session, profile)){ portalErr("Ton compte n'est rattaché à aucune organisation BSM. Demande à l'administrateur de te rattacher (rôle + organisation) avant de te connecter."); return; }
   try{ await cloudPullAll(); }catch(e){}
-  enterApp(); logEvent("login","Connexion Cloud (Supabase)", true);
+  enterApp(); setCloudSyncStatus("ok"); logEvent("login","Connexion Cloud (Supabase)", true);
   toast("Bienvenue, "+currentUser.name+".");
 }
 /* Au démarrage : si une session Supabase est présente, on entre directement (online = profil frais + données ;
@@ -642,9 +716,9 @@ async function initCloudAuth(){
   try{
     const profile=await cloudLoadProfile();       // nécessite le réseau
     if(!profile) return false;
-    applyCloudUser(session, profile);
+    if(!applyCloudUser(session, profile)) return false;   // compte sans organisation → repli portail (message clair au ré-login)
     try{ await cloudPullAll(); }catch(e){}
-    enterApp(); return true;
+    enterApp(); setCloudSyncStatus("ok"); return true;
   }catch(e){
     const cached=localStorage.getItem("bsm_cloud_user");  // hors-ligne : identité en cache + données locales
     if(cached){ try{ currentUser=JSON.parse(cached); cloudPrimary=true; cloudOrgId=currentUser.organization_id||null;
@@ -5161,6 +5235,7 @@ function lockPortal(){ // déconnexion
   if(currentUser) logEvent("logout","Déconnexion", true);
   const wasCloud = currentUser && currentUser.source==="cloud";
   clearSession(); currentUser=null; cloudPrimary=false;
+  setCloudSyncStatus();  // masque l'indicateur de synchro (plus connecté au cloud)
   if(wasCloud){ localStorage.removeItem("bsm_cloud_user"); if(typeof cloudSignOut==="function") cloudSignOut().catch(()=>{}); }
   showPortal();
 }
@@ -5222,17 +5297,24 @@ function renderAdminUsers(){
       </td></tr>`;
   }).join("");
   document.getElementById("scr-admin-users").innerHTML=`
-    <div class="pagetitle"><div><h1>Utilisateurs & accès</h1><div class="sub">${users.length} compte${users.length>1?"s":""} — administrateurs & collaborateurs, cloisonnement des accès</div></div>
-      <button class="cta" onclick="openUserForm()">+ Nouvel utilisateur</button></div>
+    <div class="pagetitle"><div><h1>Utilisateurs & accès</h1><div class="sub">Comptes de connexion & cloisonnement des accès</div></div></div>
+    ${cloudPrimary?`<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap"><h2 style="margin:0">☁️ Comptes cloud — connexion réelle (Supabase)</h2></div>
+      <div class="hint" style="margin:4px 0 8px">Ce sont les <b>vrais comptes de connexion</b>. Pour ajouter une personne, suis les 3 étapes en bas. Le rôle se règle directement ici.</div>
+      <div id="cloud-users"><div class="hint">Chargement…</div></div>
+    </div>`:""}
     <div class="card" style="background:var(--cream);border-left:3px solid var(--gold)">
       <div style="font-size:12.5px;color:var(--ink);line-height:1.6">
-        <b>Deux rôles.</b> <span class="badge b-blue">Administrateur</span> = accès à tout, y compris cet espace (utilisateurs + journal d'activité).
-        <span class="badge b-grey">Collaborateur</span> = accès au pilotage, <b>sans</b> l'espace administrateur.
-        <br><span style="color:var(--muted)">🔒 1re couche de sécurité, locale à ce navigateur/serveur. Le verrouillage réellement inviolable (par serveur, par rôle) arrivera avec la version cloud.</span>
+        <b>Rôles.</b> <span class="badge b-blue">Administrateur</span> = accès à tout. <span class="badge b-grey">Direction</span> = pilotage complet. Les autres profils (Analyste, Commercial, RH, Collaborateur) ont un accès restreint + cloisonné par niveau de confidentialité.
+        ${cloudPrimary?'<br><span style="color:var(--muted)">Le cloisonnement est appliqué côté serveur (RLS Supabase) — inviolable.</span>':'<br><span style="color:var(--muted)">🔒 Session locale : 1re couche de sécurité. Connecte-toi via le cloud pour l\'authentification serveur inviolable.</span>'}
       </div></div>
     <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap"><h2 style="margin:0">${cloudPrimary?"Comptes locaux (secours hors-ligne)":"Comptes"}</h2>
+        <button class="cta ${cloudPrimary?'ghost':''} sm" onclick="openUserForm()">+ ${cloudPrimary?"Compte local (secours)":"Nouvel utilisateur"}</button></div>
+      ${cloudPrimary?'<div class="hint" style="margin:4px 0 6px">Comptes de secours utilisables uniquement en « Mode local » (hors-ligne). Ne servent pas à la connexion cloud.</div>':''}
       <table><thead><tr><th>Nom</th><th>Identifiant</th><th>Rôle</th><th>Accès</th><th>État</th><th>Dernière activité</th><th>Créé le</th><th></th></tr></thead>
-      <tbody>${rows||'<tr><td colspan="8"><div class="empty">Aucun utilisateur.</div></td></tr>'}</tbody></table></div>`;
+      <tbody>${rows||'<tr><td colspan="8"><div class="empty">Aucun compte local.</div></td></tr>'}</tbody></table></div>`;
+  if(cloudPrimary) renderCloudUsers();
 }
 function moduleChecklistHtml(allowed){
   const groups={};
