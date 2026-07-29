@@ -281,6 +281,7 @@
     <div class="navitem" data-scr="monitoring" onclick="setScreen('monitoring')"><span class="ic">🩺</span><span class="lbl">Monitoring & suivi</span></div>
     <div class="navitem" data-scr="aireport" onclick="setScreen('aireport')"><span class="ic">🤖</span><span class="lbl">Reporting IA</span></div>
     <div class="navitem" data-scr="aiassist" onclick="setScreen('aiassist')"><span class="ic">🧩</span><span class="lbl">Assistants IA</span></div>
+    <div class="navitem" data-scr="reports" onclick="setScreen('reports')"><span class="ic">📋</span><span class="lbl">Rapports ZEUS</span></div>
     <div class="navgroup">MÉTHODE R5®</div>
     <div class="navitem" data-scr="missions" onclick="setScreen('missions')"><span class="ic">🎯</span><span class="lbl">Missions</span></div>
     <div class="navitem" data-scr="risks" onclick="setScreen('risks')"><span class="ic">⚠️</span><span class="lbl">Matrice des risques</span></div>
@@ -309,6 +310,7 @@
     <div class="screen" id="scr-roi"></div>
     <div class="screen" id="scr-aireport"></div>
     <div class="screen" id="scr-aiassist"></div>
+    <div class="screen" id="scr-reports"></div>
     <div class="screen" id="scr-monitoring"></div>
     <div class="screen" id="scr-missions"></div>
     <div class="screen" id="scr-risks"></div>
@@ -464,7 +466,7 @@ function load(){
   DB.users=DB.users||[]; DB.activityLog=DB.activityLog||[]; DB.notifications=DB.notifications||[]; DB.moneyRequests=DB.moneyRequests||[]; DB.investments=DB.investments||[]; DB.decisions=DB.decisions||[];
   DB.a1vehicles=DB.a1vehicles||[]; DB.a1logs=DB.a1logs||[]; DB.a1offers=DB.a1offers||[];
   DB.docTemplates=DB.docTemplates||[]; DB.clientDocs=DB.clientDocs||[]; DB.aiUsage=DB.aiUsage||[];
-  DB.assistants=DB.assistants||[]; DB.aiSettings=DB.aiSettings||[];
+  DB.assistants=DB.assistants||[]; DB.aiSettings=DB.aiSettings||[]; DB.reports=DB.reports||[];
   if(!DB.meta.assistantsSeeded){ if(!DB.assistants.length){ DB.assistants=defaultAssistants(); DB.aiSettings=[{ id:"main", basePrompt:defaultAiBasePrompt(), routing:defaultAiRouting() }]; } DB.meta.assistantsSeeded=true; }
   if(!DB.catalog) DB.catalog=defaultCatalog();
   if(!DB.meta.deck) DB.meta.deck=defaultDeck();
@@ -557,7 +559,7 @@ function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); serverPush
    La clé "publishable" est PUBLIQUE par nature — l'accès aux données est verrouillé par la RLS (isolation par organisation). */
 const SB_URL = "https://fxaeeplylyeitukctlph.supabase.co";
 const SB_KEY = "sb_publishable_SrXvreUFVJgLLBi6PLvA-g_ARBg2SST";
-const CLOUD_COLLECTIONS = ["clients","events","transactions","missions","risks","recommendations","employees","recruitments","leaves","activities","documents","playbooks","recurring","jobs","primes","devis","moneyRequests","investments","decisions","a1vehicles","a1logs","a1offers","docTemplates","clientDocs","aiUsage","assistants","aiSettings"];
+const CLOUD_COLLECTIONS = ["clients","events","transactions","missions","risks","recommendations","employees","recruitments","leaves","activities","documents","playbooks","recurring","jobs","primes","devis","moneyRequests","investments","decisions","a1vehicles","a1logs","a1offers","docTemplates","clientDocs","aiUsage","assistants","aiSettings","reports"];
 let _sb=null, cloudOrgId=null, cloudPrimary=false, _cloudTimer=null;
 /* Snapshot des identifiants déjà poussés PAR CE POSTE, par collection.
    Sert à propager les suppressions SANS jamais effacer ce qu'un AUTRE poste aurait ajouté
@@ -1001,7 +1003,7 @@ function setScreen(name){
 }
 function renderScreen(name){
   ({dashboard:renderDashboard, clients:renderClients, agenda:renderAgenda,
-    budget:renderBudget, ca:renderCA, resultat:renderResultat, roi:renderROI, aireport:renderAireport, aiassist:renderAiassist, monitoring:renderMonitoring, missions:renderMissions, risks:renderRisks,
+    budget:renderBudget, ca:renderCA, resultat:renderResultat, roi:renderROI, aireport:renderAireport, aiassist:renderAiassist, reports:renderReports, monitoring:renderMonitoring, missions:renderMissions, risks:renderRisks,
     carto:renderCarto, recos:renderRecos, rh:renderRH, audit:renderAudit, "a1fleet":renderA1Fleet,
     commercial:renderCommercial, documentation:renderDocumentation, fiches:renderFiches, clientfiche:renderClientFiche, analyses:renderAnalyses,
     "admin-users":renderAdminUsers, "admin-log":renderAdminLog}[name]||(()=>{}))();
@@ -5010,16 +5012,15 @@ function memoryHint(){
   return h?("\n"+h):"";
 }
 /* ---- Assistants IA calibrés : prompt de base + assistants spécialisés + routage par modèle (Claude/GPT selon la tâche) ---- */
-function defaultAiBasePrompt(){ return "Tu es un assistant du cabinet BSM Advisory & Consulting (gouvernance des risques, résilience opérationnelle, gestion de crise ; Antananarivo, Madagascar ; méthode propriétaire R5 : Reveal, Connect, Respond, Strengthen, Review).\nRègles : réponds en français, ton professionnel et institutionnel, précis et actionnable. BSM PROPOSE, le client DÉCIDE (les recommandations sont des conseils, jamais des décisions imposées). Ne divulgue jamais les informations d'un client à un autre. Si une donnée manque, dis-le plutôt que d'inventer. Structure tes réponses (titres, puces) quand c'est utile."; }
+function defaultAiBasePrompt(){ return "Tu représentes officiellement BSM Advisory & Consulting, cabinet de conseil indépendant spécialisé dans la gouvernance des risques, la résilience opérationnelle, la continuité d'activité (PCA), la reprise d'activité (PRA), la gestion de crise, l'analyse stratégique des risques et l'amélioration de la gouvernance. Basé à Antananarivo (Madagascar), il intervient auprès d'entreprises privées, institutions, ONG, groupes internationaux et organisations publiques.\n\nMéthode propriétaire R5 : Reveal (identifier risques, vulnérabilités, opportunités) · Connect (comprendre les interactions risques / processus / ressources / gouvernance) · Respond (recommandations réalistes, pragmatiques, priorisées) · Strengthen (renforcer durablement) · Review (mesurer, suivre, améliorer en continu).\n\nBSM n'impose JAMAIS une décision : le cabinet analyse, identifie les risques, éclaire les décideurs, propose des recommandations, explique avantages/limites/risques/conséquences. Les décisions appartiennent toujours au client.\n\nToutes les réponses doivent être professionnelles, institutionnelles, neutres, factuelles, argumentées, précises et directement exploitables. Ton sobre, premium, orienté dirigeant — jamais commercial agressif, jamais dramatisant. Ne jamais inventer : si une donnée manque, le préciser explicitement. Toujours distinguer faits observés / hypothèses / risques potentiels / recommandations. Recommandations réalistes, proportionnées, adaptées au contexte, hiérarchisées. S'appuyer si utile sur les bonnes pratiques reconnues (ISO 31000, ISO 22301, référentiels internationaux) sans jamais affirmer une conformité non prouvée.\n\nConfidentialité absolue : ne jamais divulguer d'informations d'un autre client ni faire référence à une autre mission ; chaque client est un environnement indépendant. En cas de doute, demander une précision plutôt que produire une réponse incertaine ; privilégier la qualité à la rapidité.\nTraçabilité : toute analyse, conclusion ou recommandation doit pouvoir être justifiée par les informations disponibles, un raisonnement explicite ou un référentiel. Transparence : présenter objectivement chaque option (avantages, limites, risques, impacts, conditions de réussite) sans orienter artificiellement le choix du client."; }
 function defaultAssistants(){ return [
-  { id:"a-report", name:"Rédacteur de rapports clients", icon:"📝", model:"claude-opus-4.7", maxClassif:"confidentiel", active:true, systemPrompt:"Spécialité : rédaction et analyse de rapports clients (audits, synthèses R5, gouvernance). Style soigné, nuancé, structuré ; appuie-toi sur les scores R5 et les risques fournis." },
-  { id:"a-analyste", name:"Analyste risques R5", icon:"⚠️", model:"claude-opus-4.7", maxClassif:"confidentiel", active:true, systemPrompt:"Spécialité : analyse des risques (probabilité × impact), cartographie, protocoles de réponse et recommandations. Distingue un risque MAÎTRISÉ (sous contrôle) d'un risque OUVERT." },
-  { id:"a-direction", name:"Assistant de direction", icon:"🧭", model:"gpt-5.5", maxClassif:"confidentiel", active:true, systemPrompt:"Spécialité : appui à la direction — synthèses, arbitrages, notes courtes et actionnables, lecture du budget et du CA." },
-  { id:"a-rh", name:"Assistant RH", icon:"👥", model:"gpt-5.4", maxClassif:"interne", active:true, systemPrompt:"Spécialité : ressources humaines — fiches de poste, primes, congés, cadre légal malgache (CNaPS/OSTIE, Code du travail)." },
-  { id:"a-commercial", name:"Assistant commercial", icon:"💼", model:"gpt-5.4", maxClassif:"interne", active:true, systemPrompt:"Spécialité : commercial — devis, propositions, relances, argumentaires, présentation des offres BSM." },
-  { id:"a-quick", name:"Assistant rapide (Q&R)", icon:"⚡", model:"gpt-5.4-mini", maxClassif:"interne", active:true, systemPrompt:"Réponses courtes, directes et économes — pour les questions simples et le tri." }
+  { id:"a-zeus", name:"ZEUS — Assistant général", icon:"⚡", model:"gpt-5.5", maxClassif:"confidentiel", active:true, systemPrompt:"Tu es ZEUS, l'intelligence centrale et l'assistant général de BSM Cockpit — le chef d'orchestre. Tu comprends l'intention réelle de l'utilisateur, tu identifies le besoin, tu t'appuies sur l'assistant le plus compétent et tu garantis cohérence, qualité, confidentialité et pertinence. Tu agis comme un Directeur des opérations IA : vision stratégique avant technique, réponses structurées, questions de clarification si les informations manquent, jamais d'information inventée. Amélioration continue : quand c'est réellement pertinent, signale discrètement UNE opportunité (améliorer une analyse, renforcer la gouvernance, réduire un risque, automatiser une tâche, gagner du temps) — jamais de suggestions inutiles." },
+  { id:"a-atlas", name:"ATLAS — Analyste principal", icon:"📊", model:"claude-opus-4.7", maxClassif:"confidentiel", active:true, systemPrompt:"Tu es ATLAS, l'analyste principal de BSM. Tu analyses données, audits, questionnaires, indicateurs, risques et historiques pour produire une analyse rigoureuse, objective et exploitable. Tu privilégies logique, faits, corrélations, causes, conséquences et priorités. Tu identifies risques critiques, points forts, vulnérabilités, incohérences et opportunités. Tu hiérarchises systématiquement les risques, expliques ton raisonnement, ne proposes que des recommandations réalistes, sans jamais décider à la place du client. Précision plutôt que quantité ; compare les scénarios (avantages, limites, impacts)." },
+  { id:"a-orion", name:"ORION — Conseiller stratégique", icon:"🧭", model:"claude-opus-4.7", maxClassif:"confidentiel", active:true, systemPrompt:"Tu es ORION, le conseiller stratégique des dirigeants. Tu construis une vision globale de l'organisation (risques, gouvernance, performances, ressources, vulnérabilités, actions réalisées, recommandations, documents) et tu produis une fiche 360° permettant au dirigeant de comprendre rapidement sa situation. Tu identifies priorités, points d'attention, progrès, risques émergents et recommandations stratégiques. Langage clair pour un dirigeant, orienté prise de décision, sans jargon inutile." },
+  { id:"a-hermes", name:"HERMÈS — Conversationnel rapide", icon:"💬", model:"gpt-5.4-mini", maxClassif:"interne", active:true, systemPrompt:"Tu es HERMÈS, l'assistant conversationnel rapide de BSM. Tu réponds aux questions simples avec rapidité, clarté, pédagogie et simplicité, de manière concise. Si la demande nécessite une expertise métier, tu indiques qu'elle doit être transférée à l'assistant spécialisé. Tu ne réalises pas d'analyses complexes, ne rédiges pas de rapports, ne produis pas d'hypothèses non justifiées." },
+  { id:"a-hephaistos", name:"HÉPHAÏSTOS — Analyse opérationnelle", icon:"🔧", model:"gpt-5.4", maxClassif:"confidentiel", active:true, systemPrompt:"Tu es HÉPHAÏSTOS, spécialiste de l'analyse opérationnelle des équipements, véhicules, machines et actifs techniques. Tu analyses disponibilités, historiques, coûts, indicateurs, pannes, maintenances et performances ; tu recherches les causes profondes, identifies les anomalies et proposes des optimisations réalistes. Tu présentes toujours : constats, causes, impacts, recommandations. Tu privilégies tableaux, synthèses et indicateurs." }
 ]; }
-function defaultAiRouting(){ return { conseils:"a-analyste", "client-advice":"a-report", qa:"a-quick", a1:"a-direction", _default:"a-direction" }; }
+function defaultAiRouting(){ return { conseils:"a-atlas", "client-advice":"a-orion", qa:"a-hermes", a1:"a-hephaistos", _default:"a-zeus" }; }
 function aiSettings(){ if(!Array.isArray(DB.aiSettings)||!DB.aiSettings.length) DB.aiSettings=[{ id:"main", basePrompt:defaultAiBasePrompt(), routing:defaultAiRouting() }]; return DB.aiSettings[0]; }
 function aiBasePrompt(){ return aiSettings().basePrompt||defaultAiBasePrompt(); }
 function aiRouting(){ return aiSettings().routing||defaultAiRouting(); }
@@ -5198,6 +5199,106 @@ function renderAiassist(){
     ${cards||'<div class="card"><div class="empty">Aucun assistant.</div></div>'}
     <div class="hint" style="margin:10px 2px">💡 « Confidentialité max envoyée » prépare le cloisonnement : un assistant ne recevra que les données jusqu'à ce niveau (application stricte avec la future couche de protection des données). Les coûts par assistant apparaissent dans <b>Reporting IA</b>.</div>`;
 }
+/* ---- Rapports ZEUS : plusieurs types, générés par l'IA, datés, classés, archivés, exportables (PDF / copie / mail) ---- */
+const REPORT_TYPES=[
+  { key:"hebdo", label:"Rapport hebdomadaire de direction", icon:"🗓️", sector:"_default", classif:"confidentiel",
+    desc:"Synthèse de pilotage : activité, finances, risques, alertes, actions de la semaine.",
+    prompt:"Produis le RAPPORT HEBDOMADAIRE DE DIRECTION du cabinet, structuré ainsi : 1) L'essentiel en 3 lignes ; 2) Finances (CA effectif vs prévu, encaissements en retard, trésorerie) ; 3) Clients & risques (risques critiques ouverts, à réviser) ; 4) Alertes & retards ; 5) Trois actions recommandées, en signalant ce qui demande une décision. Reste factuel et appuie-toi UNIQUEMENT sur les données fournies." },
+  { key:"finance", label:"Rapport financier", icon:"💰", sector:"conseils", classif:"confidentiel",
+    desc:"Analyse du chiffre d'affaires, des encaissements, du budget et de la trésorerie.",
+    prompt:"Produis un RAPPORT FINANCIER : analyse du chiffre d'affaires (effectif vs prévu), des encaissements en retard, du budget et de la trésorerie. Dégage les tendances, les points de vigilance et trois recommandations priorisées. Distingue clairement les faits des hypothèses." },
+  { key:"risques", label:"Rapport des risques (R5)", icon:"⚠️", sector:"conseils", classif:"confidentiel",
+    desc:"État du portefeuille de risques selon la méthode R5.",
+    prompt:"Produis un RAPPORT DES RISQUES du portefeuille selon la méthode R5 : risques critiques ouverts (P×I ≥ 15), risques à réviser, état des recommandations, cartographie synthétique. Hiérarchise et propose des protocoles de réponse réalistes (BSM propose, le client décide)." },
+  { key:"client", label:"Rapport client 360°", icon:"🏢", sector:"client-advice", classif:"confidentiel", needsClient:true,
+    desc:"Fiche 360° stratégique pour un client donné.",
+    prompt:"Produis une FICHE 360° / RAPPORT STRATÉGIQUE pour ce client : situation globale (risques, gouvernance, maturité R5, actions réalisées), priorités, points d'attention, progrès, risques émergents et recommandations stratégiques. Langage clair pour un dirigeant." },
+  { key:"mensuel", label:"Rapport mensuel de synthèse", icon:"📅", sector:"_default", classif:"confidentiel",
+    desc:"Synthèse mensuelle : activité, finances, risques, missions, priorités.",
+    prompt:"Produis un RAPPORT MENSUEL DE SYNTHÈSE : activité du cabinet, finances, risques, avancement des missions et des recommandations, alertes, puis priorités du mois suivant." }
+];
+function reportTypeLabel(k){ const t=REPORT_TYPES.find(x=>x.key===k); return t?t.label:k; }
+function repSetType(v){ window.repGenType=v; renderReports(); }
+function repSetFilter(v){ window.repFilter=v; renderReports(); }
+async function generateReport(typeKey, clientId){
+  const rt=REPORT_TYPES.find(t=>t.key===typeKey); if(!rt) return;
+  if(!aiProviderConf()){ toast("Configure une clé IA (Mammouth ou Mistral) dans ⚙ Paramètres."); openSettings(); return; }
+  let ctx, title=rt.label;
+  if(rt.needsClient){ const c=DB.clients.find(x=>x.id===clientId); if(!c){ toast("Choisis un client."); return; } ctx=buildClientContext(c); title=rt.label+" — "+c.company; }
+  else ctx=buildAIContext();
+  const btn=document.getElementById("rep-gen-btn"); if(btn){ btn.disabled=true; btn.textContent="Génération en cours…"; }
+  try{
+    const content=await aiChat(rt.prompt, "Données du cabinet :\n"+ctx, 1500, rt.sector);
+    const rep={ id:uid(), ts:new Date().toISOString(), type:rt.key, typeLabel:rt.label, title:title, clientId:clientId||"",
+      content:content, model:(aiResolve(rt.sector).model||""), author:(currentUser&&currentUser.name)||"", classification:rt.classif };
+    if(!Array.isArray(DB.reports)) DB.reports=[]; DB.reports.unshift(rep); if(DB.reports.length>500) DB.reports=DB.reports.slice(0,500);
+    save(); toast("Rapport généré et archivé."); renderReports(); openReport(rep.id);
+  }catch(e){ toast("Erreur : "+(e.message||e)); }
+  if(btn){ btn.disabled=false; btn.textContent="✦ Générer le rapport"; }
+}
+function openReport(id){ const r=(DB.reports||[]).find(x=>x.id===id); if(!r) return;
+  openModal(`<span class="close" onclick="closeModal()">✕</span>
+   <h2>${esc(r.title)}</h2>
+   <div class="msub"><span class="badge b-blue">${esc(reportTypeLabel(r.type))}</span> · ${esc(fmtDateTime(r.ts))} · ${esc(r.author||"")} · modèle ${esc(r.model||"—")}</div>
+   <div style="max-height:58vh;overflow:auto;white-space:pre-wrap;border:1px solid var(--line);border-radius:8px;padding:14px;margin-top:10px;font-size:13px;line-height:1.55">${esc(r.content)}</div>
+   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+     <button class="cta" onclick="printReportPDF('${r.id}')">🖨 PDF</button>
+     <button class="cta ghost" onclick="copyReport('${r.id}')">📋 Copier</button>
+     <button class="cta ghost" onclick="emailReport('${r.id}')">✉️ Préparer l'email</button></div>`);
+}
+function reportHtml(r){ const body=esc(r.content).replace(/\n/g,"<br>");
+  return "<!doctype html><html><head><meta charset=\"utf-8\"><title>"+esc(r.title)+"</title><style>"
+   +"body{font-family:Georgia,'Times New Roman',serif;color:#1A1A1A;max-width:800px;margin:24px auto;padding:0 24px;line-height:1.55}"
+   +".h{border-bottom:3px solid #B5923A;padding-bottom:10px;margin-bottom:16px}.h .b{color:#0D1F45;font-weight:700;font-size:20px}"
+   +".h .m{color:#6B7280;font-size:12px;margin-top:4px}.tag{display:inline-block;background:#0D1F45;color:#fff;padding:2px 8px;border-radius:4px;font-size:11px}</style></head><body>"
+   +"<div class=\"h\"><div class=\"b\">"+esc(DB.meta.cabinetName||"BSM Advisory & Consulting")+"</div>"
+   +"<div class=\"m\"><span class=\"tag\">"+esc(r.typeLabel||reportTypeLabel(r.type))+"</span> · "+esc(r.title)+" · Édité le "+esc(frDate(r.ts.slice(0,10)))+" · Confidentialité : "+esc(r.classification||"confidentiel")+"</div></div>"
+   +"<div>"+body+"</div></body></html>"; }
+function printReportPDF(id){ const r=(DB.reports||[]).find(x=>x.id===id); if(!r) return; openPrintable(reportHtml(r)); }
+function copyReport(id){ const r=(DB.reports||[]).find(x=>x.id===id); if(!r) return; const txt=r.title+"\n\n"+r.content;
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(function(){toast("Rapport copié — colle-le dans ton mail.");},function(){toast("Copie impossible.");}); }
+  else toast("Copie non supportée par ce navigateur."); }
+function emailReport(id){ const r=(DB.reports||[]).find(x=>x.id===id); if(!r) return; const to=DB.meta.reportEmail||"";
+  const body=r.content.length>1500? r.content.slice(0,1500)+"\n\n[…] Rapport complet : utilise « Copier » ou le PDF." : r.content;
+  window.location.href="mailto:"+encodeURIComponent(to)+"?subject="+encodeURIComponent("[BSM] "+r.title)+"&body="+encodeURIComponent(body); }
+function deleteReport(id){ confirmModal("Supprimer ce rapport ?","Il sera retiré de l'archive.", function(){ DB.reports=(DB.reports||[]).filter(function(r){return r.id!==id;}); save(); closeModal(); renderReports(); toast("Rapport supprimé."); }); }
+function renderReports(){
+  const host=document.getElementById("scr-reports"); if(!host) return;
+  if(!(isAdmin()||can("reports"))){ host.innerHTML=""; return; }
+  if(window.repGenType==null) window.repGenType="hebdo"; window.repFilter=window.repFilter||"";
+  const rt=REPORT_TYPES.find(t=>t.key===window.repGenType)||REPORT_TYPES[0];
+  const typeOpts=REPORT_TYPES.map(t=>`<option value="${t.key}" ${window.repGenType===t.key?"selected":""}>${t.icon} ${esc(t.label)}</option>`).join("");
+  const list=(DB.reports||[]).filter(r=>!window.repFilter||r.type===window.repFilter);
+  const filterChips=`<button class="cta sm ${!window.repFilter?'':'ghost'}" onclick="repSetFilter('')">Tous</button>`+REPORT_TYPES.map(t=>`<button class="cta sm ${window.repFilter===t.key?'':'ghost'}" onclick="repSetFilter('${t.key}')" title="${esc(t.label)}">${t.icon}</button>`).join("");
+  const rows=list.map(r=>`<tr>
+      <td style="white-space:nowrap">${esc(fmtDateTime(r.ts))}</td>
+      <td><span class="badge b-blue">${esc(reportTypeLabel(r.type))}</span></td>
+      <td><b>${esc(r.title)}</b></td>
+      <td>${typeof classifBadge==="function"?classifBadge(r.classification):esc(r.classification||"")}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button class="cta ghost sm" onclick="openReport('${r.id}')">Voir</button>
+        <button class="cta ghost sm" onclick="printReportPDF('${r.id}')" title="PDF">🖨</button>
+        <button class="cta ghost sm" onclick="copyReport('${r.id}')" title="Copier">📋</button>
+        <button class="cta ghost sm" onclick="emailReport('${r.id}')" title="Email">✉️</button>
+        <button class="cta ghost sm" style="color:var(--red)" onclick="deleteReport('${r.id}')" title="Supprimer">🗑</button></td></tr>`).join("");
+  const assistant=aiAssistantForSector(rt.sector); const prov=aiProviderConf();
+  host.innerHTML=`
+    <div class="pagetitle"><div><h1>Rapports ZEUS</h1><div class="sub">Rapports générés par l'IA — classés, datés, archivés, exportables (PDF · copie · mail)</div></div></div>
+    <div class="card" style="border-left:3px solid var(--gold)">
+      <h2 style="margin-top:0">Générer un rapport</h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div class="field" style="margin:0;min-width:280px"><label>Type de rapport</label><select id="rep-type" onchange="repSetType(this.value)">${typeOpts}</select></div>
+        ${rt.needsClient?`<div class="field" style="margin:0"><label>Client</label><select id="rep-client">${DB.clients.map(c=>`<option value="${c.id}">${esc(c.company)}</option>`).join("")}</select></div>`:""}
+        <button class="cta" id="rep-gen-btn" onclick="generateReport(document.getElementById('rep-type').value, document.getElementById('rep-client')?document.getElementById('rep-client').value:'')">✦ Générer le rapport</button>
+      </div>
+      <div class="hint" style="margin-top:8px">${esc(rt.desc||"")} Assistant utilisé : <b>${esc((assistant&&assistant.name)||"—")}</b>${prov?` (${esc(prov.name==='mammouth'?((assistant&&assistant.model)||prov.model):prov.model)})`:''}. Le rapport est daté, archivé ci-dessous et exportable immédiatement.</div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">Archive des rapports (${(DB.reports||[]).length})</h2><div style="display:flex;gap:6px;flex-wrap:wrap">${filterChips}</div></div>
+      <table style="margin-top:10px"><thead><tr><th>Date</th><th>Type</th><th>Titre</th><th>Confid.</th><th style="text-align:right">Actions</th></tr></thead>
+      <tbody>${rows||'<tr><td colspan="5"><div class="empty">Aucun rapport encore. Génère ton premier rapport ci-dessus.</div></td></tr>'}</tbody></table>
+    </div>`;
+}
 function buildAIContext(){
   const a=agg();
   let t=`Cabinet : ${DB.meta.cabinetName||"BSM Advisory & Consulting"} — gouvernance des risques, Madagascar, méthode R5.\n`;
@@ -5266,7 +5367,7 @@ async function aiAskQuestion(){
 }
 async function aiClientAdvice(id){
   const c=DB.clients.find(x=>x.id===id); if(!c) return;
-  if(!(DB.meta.mistralKey||"").trim()){ toast("Configure ta clé Mistral dans ⚙ Paramètres."); openSettings(); return; }
+  if(!aiProviderConf()){ toast("Configure une clé IA (Mammouth ou Mistral) dans ⚙ Paramètres."); openSettings(); return; }
   openModal(`<span class="close" onclick="closeModal()">✕</span><h2>🤖 Conseil IA — ${esc(c.company)}</h2><div class="msub">Généré à partir des données de ce client.</div><div id="cai-out"><div class="hint">Génération en cours…</div></div>`);
   try{
     const sys="Tu es consultant senior en gouvernance des risques chez BSM Advisory & Consulting (méthode R5). Rédige pour ce client : une synthèse de suivi (2-3 phrases) puis 3 conseils d'action priorisés, concrets et actionnables. Concis, orienté décision, sans préambule.";
@@ -5286,7 +5387,7 @@ function aiSaveClientAdvice(){
 
 /* --- Assistant conversationnel + mémoire apprenante --- */
 function aiSystemPrompt(){
-  let s="Tu es l'assistant IA de "+(DB.meta.cabinetName||"BSM Advisory & Consulting")+", cabinet de gouvernance des risques (méthode R5, Madagascar). Tu aides à piloter le cabinet — conseils, analyses, décisions — en français, de façon concise et actionnable. Utilise les données et la mémoire ci-dessous ; si une information manque, dis-le clairement plutôt que d'inventer.\n\n=== DONNÉES ACTUELLES DU CABINET ===\n"+buildAIContext();
+  let s=aiResolve("_default").sysPrefix+"\n\n=== DONNÉES ACTUELLES DU CABINET ===\n"+buildAIContext();
   const mem=DB.aiMemory||[]; if(mem.length) s+="\n\n=== MÉMOIRE (préférences, faits validés, corrections à respecter) ===\n"+mem.map(m=>"- "+m.text).join("\n");
   const conseils=DB.advice.custom||[]; if(conseils.length) s+="\n\n=== CONSEILS DÉJÀ RETENUS PAR L'UTILISATEUR (aligne ton style dessus) ===\n"+conseils.slice(-8).map(c=>"- "+(c.text||"").slice(0,160)).join("\n");
   return s.length>9000?s.slice(0,9000)+"…":s;
@@ -5306,7 +5407,7 @@ function renderAiChat(){
 async function sendAiChat(){
   const inp=document.getElementById("ai-chat-input"); const q=((inp&&inp.value)||"").trim();
   if(!q) return;
-  if(!(DB.meta.mistralKey||"").trim()){ toast("Configure ta clé Mistral dans ⚙ Paramètres."); openSettings(); return; }
+  if(!aiProviderConf()){ toast("Configure une clé IA (Mammouth ou Mistral) dans ⚙ Paramètres."); openSettings(); return; }
   if(inp) inp.value="";
   DB.aiChat.push({role:"user",content:q}); save(); renderAiChat();
   const el=document.getElementById("ai-msgs");
@@ -5314,7 +5415,8 @@ async function sendAiChat(){
   if(el){ el.appendChild(typing); el.scrollTop=el.scrollHeight; }
   try{
     const history=DB.aiChat.slice(-20).map(function(m){return{role:m.role,content:m.content};});
-    const res=await aiComplete([{role:"system",content:aiSystemPrompt()}].concat(history), 900);
+    const _z=aiResolve("_default");
+    const res=await aiComplete([{role:"system",content:aiSystemPrompt()}].concat(history), 900, "_default", _z.model);
     DB.aiChat.push({role:"assistant",content:res}); save(); renderAiChat();
   }catch(e){ if(typing) typing.textContent="⚠ "+e.message; }
 }
@@ -5359,6 +5461,7 @@ const PERMSCREENS=[
   {key:"monitoring",label:"Monitoring & suivi",grp:"PILOTAGE"},
   {key:"aireport", label:"Reporting IA",grp:"PILOTAGE",fin:true},
   {key:"aiassist", label:"Assistants IA",grp:"PILOTAGE",fin:true},
+  {key:"reports",  label:"Rapports ZEUS",grp:"PILOTAGE",fin:true},
   {key:"missions", label:"Missions (R5)",grp:"MÉTHODE R5"},
   {key:"risks",    label:"Matrice des risques (R5)",grp:"MÉTHODE R5"},
   {key:"carto",    label:"Cartographie (R5)",grp:"MÉTHODE R5"},
@@ -5374,7 +5477,7 @@ function permAll(){ return PERMSCREENS.map(p=>p.key); }
 /* Modèles de rôle = accès par défaut (élargissables ensuite, par utilisateur). clientFinance = voir CA/contrats/devis dans la fiche client. */
 const ROLE_TEMPLATES={
   admin:       { label:"Administrateur", allowed:"*", clientFinance:true },
-  direction:   { label:"Direction",      allowed:["dashboard","clients","agenda","budget","ca","resultat","roi","aireport","aiassist","monitoring","missions","risks","carto","recos","commercial","rh","audit","documentation","fiches","analyses"], clientFinance:true },
+  direction:   { label:"Direction",      allowed:["dashboard","clients","agenda","budget","ca","resultat","roi","aireport","aiassist","reports","monitoring","missions","risks","carto","recos","commercial","rh","audit","documentation","fiches","analyses"], clientFinance:true },
   analyste:    { label:"Analyste R5",     allowed:["clients","monitoring","missions","risks","carto","recos","audit","documentation","fiches"], clientFinance:false },
   commercial:  { label:"Commercial",      allowed:["clients","agenda","monitoring","commercial","documentation","fiches"], clientFinance:true },
   rh:          { label:"RH",              allowed:["rh","agenda","monitoring","documentation","fiches"], clientFinance:false },
