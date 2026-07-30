@@ -466,7 +466,7 @@ function load(){
   DB.users=DB.users||[]; DB.activityLog=DB.activityLog||[]; DB.notifications=DB.notifications||[]; DB.moneyRequests=DB.moneyRequests||[]; DB.investments=DB.investments||[]; DB.decisions=DB.decisions||[];
   DB.a1vehicles=DB.a1vehicles||[]; DB.a1logs=DB.a1logs||[]; DB.a1offers=DB.a1offers||[];
   DB.docTemplates=DB.docTemplates||[]; DB.clientDocs=DB.clientDocs||[]; DB.aiUsage=DB.aiUsage||[];
-  DB.assistants=DB.assistants||[]; DB.aiSettings=DB.aiSettings||[]; DB.reports=DB.reports||[];
+  DB.assistants=DB.assistants||[]; DB.aiSettings=DB.aiSettings||[]; DB.reports=DB.reports||[]; DB.knowledge=DB.knowledge||[];
   if(!DB.meta.assistantsSeeded){ if(!DB.assistants.length){ DB.assistants=defaultAssistants(); DB.aiSettings=[{ id:"main", basePrompt:defaultAiBasePrompt(), routing:defaultAiRouting() }]; } DB.meta.assistantsSeeded=true; }
   if(!DB.catalog) DB.catalog=defaultCatalog();
   if(!DB.meta.deck) DB.meta.deck=defaultDeck();
@@ -559,7 +559,7 @@ function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); serverPush
    La clé "publishable" est PUBLIQUE par nature — l'accès aux données est verrouillé par la RLS (isolation par organisation). */
 const SB_URL = "https://fxaeeplylyeitukctlph.supabase.co";
 const SB_KEY = "sb_publishable_SrXvreUFVJgLLBi6PLvA-g_ARBg2SST";
-const CLOUD_COLLECTIONS = ["clients","events","transactions","missions","risks","recommendations","employees","recruitments","leaves","activities","documents","playbooks","recurring","jobs","primes","devis","moneyRequests","investments","decisions","a1vehicles","a1logs","a1offers","docTemplates","clientDocs","aiUsage","assistants","aiSettings","reports"];
+const CLOUD_COLLECTIONS = ["clients","events","transactions","missions","risks","recommendations","employees","recruitments","leaves","activities","documents","playbooks","recurring","jobs","primes","devis","moneyRequests","investments","decisions","a1vehicles","a1logs","a1offers","docTemplates","clientDocs","aiUsage","assistants","aiSettings","reports","knowledge"];
 let _sb=null, cloudOrgId=null, cloudPrimary=false, _cloudTimer=null;
 /* Snapshot des identifiants déjà poussés PAR CE POSTE, par collection.
    Sert à propager les suppressions SANS jamais effacer ce qu'un AUTRE poste aurait ajouté
@@ -1962,6 +1962,7 @@ function renderDocumentation(){
       ${gen?`<div style="display:flex;gap:8px"><button class="cta ghost" onclick="resetDocTemplates()">↺ Modèles par défaut</button><button class="cta" onclick="openDocTemplateForm()">+ Nouveau modèle</button></div>`:""}</div>
     <div class="hint" style="margin-bottom:12px">🖋️ Tous les documents partagent le <b>même en-tête, coordonnées et blocs de signature</b> (identiques au devis du simulateur). Le corps se rédige en texte simple : <code>## Titre</code> pour une section, <code>-</code> pour une puce. Variables auto-remplies : <code>{{client}}</code>, <code>{{contact}}</code>, <code>{{objet}}</code>, <code>{{montant}}</code>, <code>{{date}}</code>, <code>{{cabinet}}</code>, <code>{{signataire}}</code>.</div>
     ${docPresentationCard()}
+    ${knowledgeCard()}
     <h2 style="margin:6px 2px 8px">Bibliothèque de modèles</h2>
     <div class="grid3">
       ${tpls.length?tpls.map(t=>{const m=docTypeMeta(t.type);return `<div class="fiche-card">
@@ -1992,6 +1993,124 @@ function resetDocTemplates(){
   confirmModal("Réinstaller les modèles par défaut ?", "Cela remplace la bibliothèque par les modèles BSM d'origine. Les documents déjà générés pour tes clients ne sont pas touchés.", ()=>{
     DB.docTemplates=defaultDocTemplates(); DB.meta.docTemplatesVersion=DOC_TEMPLATES_VERSION; save(); renderDocumentation(); toast("Modèles par défaut réinstallés.");
   });
+}
+
+/* ============================================================================
+   BASE DE CONNAISSANCES IA — documents officiels internes lus par les assistants
+   Ajout par : collage de texte · upload PDF/Word (extraction auto) · import JSON.
+   Injectés dans le contexte de TOUS les assistants via knowledgeContext().
+   ========================================================================== */
+const KB_CATEGORIES={ methode:"Méthode R5", outils:"Matrice & outils", pricing:"Pricing & devis", contrats:"Contrats & CGV", audit:"Audit & trames", iso:"Référentiels (ISO…)", autre:"Autre" };
+function kbCatLabel(k){ return KB_CATEGORIES[k]||"Autre"; }
+function kbv(id){ const e=document.getElementById(id); return e?e.value:""; }
+function knowledgeCard(){
+  const gen=can("documentation"); const docs=kbList(); const act=kbActiveForAI();
+  const usedK=Math.round(act.reduce((s,d)=>s+((d.content||"").length),0)/1000);
+  return `<div class="card" style="margin-top:14px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+      <div><h2 style="margin:0">📚 Base de connaissances IA (${docs.length})</h2>
+        <div class="hint" style="margin:4px 0 0">Documents officiels internes lus par <b>tous les assistants</b> (ZEUS, ATLAS, ORION…). ${docs.length?act.length+" actif(s) · ~"+usedK+"k caractères":"Vide pour l'instant."}</div></div>
+      ${gen?`<div style="display:flex;gap:8px;flex-wrap:wrap">
+        <label class="cta ghost sm" style="cursor:pointer">⇪ Fichier (PDF/Word)<input type="file" accept=".pdf,.doc,.docx" style="display:none" onchange="uploadKnowledgeFile(this)"></label>
+        <label class="cta ghost sm" style="cursor:pointer">⇊ Base (JSON)<input type="file" accept=".json,application/json" style="display:none" onchange="importKnowledgeJSON(this)"></label>
+        <button class="cta sm" onclick="openKnowledgeForm()">+ Ajouter (texte)</button></div>`:""}
+    </div>
+    ${docs.length?`<table style="margin-top:10px"><thead><tr><th>Document</th><th>Catégorie</th><th>Confidentialité</th><th>Taille</th><th>MAJ</th><th title="Lu par l'IA">IA</th><th></th></tr></thead><tbody>`+
+      docs.map(d=>`<tr>
+        <td><b>${esc(d.title||"—")}</b>${d.source?`<div style="font-size:10.5px;color:var(--muted)">${esc(d.source)}</div>`:""}</td>
+        <td><span class="badge b-grey">${kbCatLabel(d.category)}</span></td>
+        <td>${classifBadge(d.classification||"interne")}</td>
+        <td style="font-size:11.5px">${Math.round((d.content||"").length/1000)}k</td>
+        <td style="font-size:11.5px">${esc(d.updatedAt||"—")}</td>
+        <td style="text-align:center"><input type="checkbox" ${d.includeInAI!==false?"checked":""} onchange="toggleKnowledgeAI('${d.id}')" ${gen?"":"disabled"} title="Utilisé par les assistants IA"></td>
+        <td style="text-align:right;white-space:nowrap"><button class="iconbtn" title="Voir / modifier" onclick="openKnowledgeForm('${d.id}')">${gen?"✎":"👁"}</button>${gen?`<button class="iconbtn del" title="Supprimer" onclick="deleteKnowledge('${d.id}')">🗑</button>`:""}</td>
+      </tr>`).join("")+`</tbody></table>`
+      :`<div class="empty" style="margin-top:10px">Aucun document. Importe tes documents officiels (PDF/Word) ou colle du texte — les assistants IA s'appuieront dessus.</div>`}
+  </div>`;
+}
+function openKnowledgeForm(id){
+  const gen=can("documentation"); const d=id?kbList().find(x=>x.id===id):null;
+  const cats=Object.keys(KB_CATEGORIES).map(k=>`<option value="${k}" ${d&&d.category===k?"selected":""}>${KB_CATEGORIES[k]}</option>`).join("");
+  openModal(`<span class="close" onclick="closeModal()">✕</span>
+    <h2>${d?(gen?"Modifier":"Document"):"Ajouter"} un document de référence</h2>
+    <div class="msub">Le texte ci-dessous est lu par les assistants IA (ZEUS, ATLAS, ORION…).</div>
+    <div class="frow"><label>Titre<input id="kb-title" value="${d?esc(d.title):""}" ${gen?"":"disabled"}></label></div>
+    <div class="frow" style="display:flex;gap:8px">
+      <label style="flex:1">Catégorie<select id="kb-cat" ${gen?"":"disabled"}>${cats}</select></label>
+      <label style="flex:1">Confidentialité<select id="kb-classif" ${gen?"":"disabled"}>${classifOptions(d?(d.classification||"interne"):"interne")}</select></label>
+    </div>
+    <div class="frow"><label>Contenu (texte lu par l'IA)<textarea id="kb-content" rows="14" style="font-family:inherit;font-size:12.5px" ${gen?"":"disabled"}>${d?esc(d.content):""}</textarea></label></div>
+    <label style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input type="checkbox" id="kb-ai" ${!d||d.includeInAI!==false?"checked":""} ${gen?"":"disabled"}> Utilisé par les assistants IA</label>
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Fermer</button>${gen?`<button class="cta" onclick="saveKnowledge('${d?d.id:""}')">Enregistrer</button>`:""}</div>`);
+}
+function saveKnowledge(id){
+  const title=(kbv("kb-title")||"").trim(); if(!title){ toast("Titre requis."); return; }
+  const now=todayISO(); const list=kbList(); let d=id?list.find(x=>x.id===id):null;
+  const data={ title, category:kbv("kb-cat")||"autre", classification:kbv("kb-classif")||"interne",
+    content:kbv("kb-content")||"", includeInAI:!!(document.getElementById("kb-ai")&&document.getElementById("kb-ai").checked), updatedAt:now };
+  if(d){ Object.assign(d,data); } else { list.push(Object.assign({id:"kb-"+uid(),active:true,createdAt:now,source:"saisie"},data)); }
+  save(); closeModal(); renderDocumentation(); toast("Document enregistré.");
+}
+function deleteKnowledge(id){ confirmModal("Supprimer ce document ?","Il ne sera plus lu par les assistants IA.",()=>{ DB.knowledge=kbList().filter(x=>x.id!==id); save(); renderDocumentation(); toast("Supprimé."); }); }
+function toggleKnowledgeAI(id){ const d=kbList().find(x=>x.id===id); if(!d) return; d.includeInAI=!(d.includeInAI!==false); save(); renderDocumentation(); }
+function importKnowledgeJSON(inp){
+  const f=inp.files&&inp.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=function(){
+    try{
+      const j=JSON.parse(rd.result); const arr=Array.isArray(j)?j:(j.knowledge||[]);
+      if(!arr.length){ toast("Aucun document dans ce fichier."); inp.value=""; return; }
+      const now=todayISO(), list=kbList(); let added=0, upd=0;
+      arr.forEach(function(o){
+        if(!o||!o.content) return;
+        const title=o.title||"Document"; let ex=list.find(x=>x.title===title);
+        const data={ title, category:o.category||"autre", classification:o.classification||"interne",
+          content:o.content, source:o.source||"import", includeInAI:o.includeInAI!==false, active:o.active!==false, updatedAt:o.updatedAt||now };
+        if(ex){ Object.assign(ex,data); upd++; } else { list.push(Object.assign({id:"kb-"+uid(),createdAt:now},data)); added++; }
+      });
+      save(); renderDocumentation(); toast(added+" ajouté(s), "+upd+" mis à jour.");
+    }catch(e){ toast("Fichier JSON invalide."); }
+    inp.value="";
+  };
+  rd.readAsText(f);
+}
+async function uploadKnowledgeFile(inp){
+  const f=inp.files&&inp.files[0]; if(!f){ return; }
+  toast("Extraction du texte en cours…");
+  try{
+    let text="";
+    if(/\.pdf$/i.test(f.name)) text=await extractPdfText(f);
+    else if(/\.docx?$/i.test(f.name)) text=await extractDocxText(f);
+    else { toast("Format non pris en charge (PDF ou Word)."); inp.value=""; return; }
+    text=(text||"").trim();
+    if(!text){ toast("Aucun texte extrait (PDF scanné/image ?). Colle le texte à la main."); inp.value=""; return; }
+    const now=todayISO();
+    const doc={ id:"kb-"+uid(), title:f.name.replace(/\.[^.]+$/,""), category:"autre", classification:"interne",
+      content:text, source:f.name, includeInAI:true, active:true, createdAt:now, updatedAt:now };
+    kbList().push(doc); save(); renderDocumentation();
+    toast("Importé ("+Math.round(text.length/1000)+"k caractères) — vérifie la catégorie.");
+    openKnowledgeForm(doc.id);
+  }catch(e){ toast("Extraction impossible : "+e.message); }
+  inp.value="";
+}
+let _pdfjsLib=null;
+async function extractPdfText(file){
+  if(!_pdfjsLib){
+    _pdfjsLib=await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4/build/pdf.min.mjs");
+    _pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@4/build/pdf.worker.min.mjs";
+  }
+  const buf=await file.arrayBuffer();
+  const pdf=await _pdfjsLib.getDocument({data:buf}).promise;
+  const out=[];
+  for(let i=1;i<=pdf.numPages;i++){ const pg=await pdf.getPage(i); const tc=await pg.getTextContent(); out.push(tc.items.map(it=>it.str).join(" ")); }
+  return out.join("\n\n");
+}
+function kbLoadScript(src){ return new Promise(function(res,rej){ if(document.querySelector('script[data-kb="'+src+'"]')) return res(); const s=document.createElement("script"); s.src=src; s.setAttribute("data-kb",src); s.onload=res; s.onerror=function(){rej(new Error("chargement librairie"));}; document.head.appendChild(s); }); }
+async function extractDocxText(file){
+  await kbLoadScript("https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js");
+  const buf=await file.arrayBuffer();
+  const r=await window.mammoth.extractRawText({arrayBuffer:buf});
+  return r.value||"";
 }
 function openDocTemplateForm(id){
   const t=id?DB.docTemplates.find(x=>x.id===id):{type:"contrat",title:"",body:"",active:true};
@@ -5038,8 +5157,26 @@ function aiResolve(sector){
 }
 async function aiChat(system, user, maxTokens, sector){
   const r=aiResolve(sector);
-  const sys=r.sysPrefix+"\n\n"+system+memoryHint();
+  const sys=r.sysPrefix+"\n\n"+system+memoryHint()+knowledgeContext();
   return aiComplete([{role:"system",content:sys},{role:"user",content:user}], maxTokens, sector, r.model);
+}
+/* ---- Base de connaissances : documents officiels internes injectés dans le contexte de TOUS les assistants ---- */
+function kbList(){ if(!Array.isArray(DB.knowledge)) DB.knowledge=[]; return DB.knowledge; }
+function kbActiveForAI(){ return kbList().filter(d=>d && d.active!==false && d.includeInAI!==false && (d.content||"").trim()); }
+function knowledgeContext(budget){
+  const docs=kbActiveForAI(); if(!docs.length) return "";
+  budget=budget||3800;
+  const perDoc=Math.max(500, Math.floor(budget/docs.length));
+  const parts=[];
+  docs.forEach(d=>{
+    let c=(d.content||"").trim(); if(!c) return;
+    if(c.length>perDoc) c=c.slice(0,perDoc)+"…";
+    parts.push("### "+(d.title||"Document")+" ["+kbCatLabel(d.category)+(d.updatedAt?", MAJ "+d.updatedAt:"")+"]\n"+c);
+  });
+  if(!parts.length) return "";
+  let block=parts.join("\n\n");
+  if(block.length>budget) block=block.slice(0,budget)+"…";
+  return "\n\n=== DOCUMENTS DE RÉFÉRENCE BSM (documents officiels internes — appuie-toi dessus et cite-les si utile) ===\n"+block;
 }
 /* ---- Métrologie IA : comptage tokens + coût estimé + report automatique au budget ---- */
 const AI_MODELS_MAMMOUTH=["mammouth-recommended","gpt-5.5","gpt-5.4","gpt-5.4-mini","claude-opus-4.7","mistral-medium-3.1","gemini-3.1-flash-preview","llama-4-maverick","deepseek-v4-flash"];
@@ -5457,7 +5594,8 @@ function aiSystemPrompt(){
   let s=aiResolve("_default").sysPrefix+"\n\n=== DONNÉES ACTUELLES DU CABINET ===\n"+buildAIContext();
   const mem=DB.aiMemory||[]; if(mem.length) s+="\n\n=== MÉMOIRE (préférences, faits validés, corrections à respecter) ===\n"+mem.map(m=>"- "+m.text).join("\n");
   const conseils=DB.advice.custom||[]; if(conseils.length) s+="\n\n=== CONSEILS DÉJÀ RETENUS PAR L'UTILISATEUR (aligne ton style dessus) ===\n"+conseils.slice(-8).map(c=>"- "+(c.text||"").slice(0,160)).join("\n");
-  return s.length>9000?s.slice(0,9000)+"…":s;
+  s+=knowledgeContext();
+  return s.length>12000?s.slice(0,12000)+"…":s;
 }
 function openAiChat(){ const d=document.getElementById("ai-drawer"); if(d)d.classList.add("open"); renderAiChat(); setTimeout(function(){var i=document.getElementById("ai-chat-input");if(i)i.focus();},60); }
 function closeAiChat(){ const d=document.getElementById("ai-drawer"); if(d)d.classList.remove("open"); }
