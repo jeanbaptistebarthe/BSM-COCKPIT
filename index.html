@@ -272,28 +272,30 @@
     <div class="who">J-B. Barthe · Direction</div>
     <div class="navgroup">PILOTAGE</div>
     <div class="navitem active" data-scr="dashboard" onclick="setScreen('dashboard')"><span class="ic">▦</span><span class="lbl">Tableau de bord</span></div>
+    <div class="navitem" data-scr="monitoring" onclick="setScreen('monitoring')"><span class="ic">🩺</span><span class="lbl">Monitoring & suivi</span></div>
     <div class="navitem" data-scr="clients" onclick="setScreen('clients')"><span class="ic">👥</span><span class="lbl">Clients</span></div>
     <div class="navitem" data-scr="agenda" onclick="setScreen('agenda')"><span class="ic">📅</span><span class="lbl">Agenda</span></div>
+    <div class="navgroup">FINANCES</div>
     <div class="navitem" data-scr="budget" onclick="setScreen('budget')"><span class="ic">💶</span><span class="lbl">Budget</span></div>
     <div class="navitem" data-scr="ca" onclick="setScreen('ca')"><span class="ic">📈</span><span class="lbl">Chiffre d'affaires</span></div>
     <div class="navitem" data-scr="resultat" onclick="setScreen('resultat')"><span class="ic">🧾</span><span class="lbl">Compte de résultat</span></div>
     <div class="navitem" data-scr="roi" onclick="setScreen('roi')"><span class="ic">📊</span><span class="lbl">ROI & Investissements</span></div>
-    <div class="navitem" data-scr="monitoring" onclick="setScreen('monitoring')"><span class="ic">🩺</span><span class="lbl">Monitoring & suivi</span></div>
-    <div class="navitem" data-scr="aireport" onclick="setScreen('aireport')"><span class="ic">🤖</span><span class="lbl">Reporting IA</span></div>
-    <div class="navitem" data-scr="aiassist" onclick="setScreen('aiassist')"><span class="ic">🧩</span><span class="lbl">Assistants IA</span></div>
-    <div class="navitem" data-scr="reports" onclick="setScreen('reports')"><span class="ic">📋</span><span class="lbl">Rapports ZEUS</span></div>
     <div class="navgroup">MÉTHODE R5®</div>
     <div class="navitem" data-scr="missions" onclick="setScreen('missions')"><span class="ic">🎯</span><span class="lbl">Missions</span></div>
     <div class="navitem" data-scr="risks" onclick="setScreen('risks')"><span class="ic">⚠️</span><span class="lbl">Matrice des risques</span></div>
     <div class="navitem" data-scr="carto" onclick="setScreen('carto')"><span class="ic">🗺️</span><span class="lbl">Cartographie</span></div>
     <div class="navitem" data-scr="recos" onclick="setScreen('recos')"><span class="ic">✅</span><span class="lbl">Recommandations</span></div>
+    <div class="navitem" data-scr="audit" onclick="setScreen('audit')"><span class="ic">📝</span><span class="lbl">Audit terrain</span></div>
     <div class="navitem" data-scr="analyses" onclick="setScreen('analyses')"><span class="ic">🧠</span><span class="lbl">Analyses & Conseils</span><span id="nav-advice-badge" class="badge-nav" style="display:none">0</span></div>
+    <div class="navgroup">INTELLIGENCE IA</div>
+    <div class="navitem" data-scr="aiassist" onclick="setScreen('aiassist')"><span class="ic">🧩</span><span class="lbl">Assistants IA</span></div>
+    <div class="navitem" data-scr="reports" onclick="setScreen('reports')"><span class="ic">📋</span><span class="lbl">Rapports ZEUS</span></div>
+    <div class="navitem" data-scr="aireport" onclick="setScreen('aireport')"><span class="ic">🤖</span><span class="lbl">Reporting IA</span></div>
     <div class="navgroup">COMMERCIAL</div>
     <div class="navitem" data-scr="commercial" onclick="setScreen('commercial')"><span class="ic">💼</span><span class="lbl">Simulateur</span></div>
+    <div class="navitem" data-scr="documentation" onclick="setScreen('documentation')"><span class="ic">🗂️</span><span class="lbl">Documentation</span></div>
     <div class="navgroup">CABINET</div>
     <div class="navitem" data-scr="rh" onclick="setScreen('rh')"><span class="ic">🧑‍💼</span><span class="lbl">RH & équipe</span></div>
-    <div class="navitem" data-scr="audit" onclick="setScreen('audit')"><span class="ic">📝</span><span class="lbl">Audit terrain</span></div>
-    <div class="navitem" data-scr="documentation" onclick="setScreen('documentation')"><span class="ic">🗂️</span><span class="lbl">Documentation</span></div>
     <div class="navitem" data-scr="fiches" onclick="setScreen('fiches')"><span class="ic">🆘</span><span class="lbl">Fiches réflexes</span></div>
     <div class="navgroup admin-only" style="display:none">ADMINISTRATION</div>
     <div class="navitem admin-only" data-scr="admin-users" onclick="setScreen('admin-users')" style="display:none"><span class="ic">🔐</span><span class="lbl">Utilisateurs & accès</span></div>
@@ -811,6 +813,72 @@ async function cloudBackupNow(){
     if(error){ toast("Erreur : "+error.message); return; }
     toast("Sauvegarde créée."); refreshBackupsPanel(); }
   catch(e){ toast("Cloud indisponible."); }
+}
+/* ---- Notifications e-mail (Edge Function send-alerts + Resend) ---- */
+async function refreshNotifPanel(){
+  const el=document.getElementById("notif-mail-panel"); if(!el) return;
+  if(!cloudPrimary){ el.innerHTML=`<div class="hint">Connecte-toi au Cloud pour activer les notifications e-mail automatiques (elles tournent côté serveur, même PC éteint).</div>`; return; }
+  if(typeof isDirection==="function" && !isDirection()){ el.innerHTML=`<div class="hint">Réservé à la direction et à l'administration.</div>`; return; }
+  el.innerHTML=`<div class="hint">Chargement…</div>`;
+  let c; try{ c=await sbClient(); }catch(e){ el.innerHTML=`<div class="hint" style="color:var(--orange)">Cloud indisponible.</div>`; return; }
+  const { data, error } = await c.from("notification_settings").select("*").eq("organization_id",cloudOrgId).single();
+  if(error && error.code && error.code!=="PGRST116"){ // PGRST116 = 0 ligne (normal la 1re fois)
+    el.innerHTML=`<div class="hint" style="color:var(--red)">Erreur : ${esc(error.message)}<br><span style="color:var(--muted)">As-tu exécuté la migration 0003_notifications.sql ?</span></div>`; return;
+  }
+  const s=data||{ email:(DB.meta.reportEmail||""), enabled:true, digest_enabled:true, digest_freq:"daily", digest_hour:6, digest_weekday:1, instant_enabled:true, rdv_enabled:true, rdv_days_ahead:1 };
+  const days=[["1","lundi"],["2","mardi"],["3","mercredi"],["4","jeudi"],["5","vendredi"],["6","samedi"],["0","dimanche"]];
+  const hours=Array.from({length:24},(_,h)=>`<option value="${h}" ${(+s.digest_hour)===h?"selected":""}>${String(h).padStart(2,"0")}h</option>`).join("");
+  el.innerHTML=`
+    <div class="frow"><label>Destinataire(s) — sépare par des virgules<input id="nf-email" value="${esc(s.email||"")}" placeholder="jeanbaptiste.barthe@bsmconseils.com"></label></div>
+    <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;margin:2px 0"><input type="checkbox" id="nf-enabled" ${s.enabled!==false?"checked":""}> <b>Activer les notifications automatiques</b> (récap + alertes + RDV)</label>
+    <div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:6px">
+      <label style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input type="checkbox" id="nf-digest" ${s.digest_enabled!==false?"checked":""}> 📋 Récapitulatif planifié</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 2px 22px;align-items:center">
+        <select id="nf-freq"><option value="daily" ${s.digest_freq!=="weekly"?"selected":""}>quotidien</option><option value="weekly" ${s.digest_freq==="weekly"?"selected":""}>hebdomadaire</option></select>
+        <span style="font-size:12px;color:var(--muted)">à</span><select id="nf-hour">${hours}</select>
+        <span style="font-size:12px;color:var(--muted)">(heure de Tana)</span>
+        <select id="nf-weekday" title="Jour (si hebdomadaire)">${days.map(d=>`<option value="${d[0]}" ${(+s.digest_weekday)===(+d[0])?"selected":""}>${d[1]}</option>`).join("")}</select>
+      </div>
+    </div>
+    <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;margin-top:6px"><input type="checkbox" id="nf-instant" ${s.instant_enabled!==false?"checked":""}> 🔴 Alertes instantanées (risque critique, encaissement/charge en retard)</label>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+      <label style="display:flex;gap:6px;align-items:center;font-size:12.5px"><input type="checkbox" id="nf-rdv" ${s.rdv_enabled!==false?"checked":""}> 📅 Rappels de rendez-vous</label>
+      <select id="nf-rdvdays" title="Rappel des RDV des N prochains jours">${[["0","le jour même"],["1","J-1"],["2","2 jours avant"],["3","3 jours avant"],["7","1 semaine avant"]].map(o=>`<option value="${o[0]}" ${(+s.rdv_days_ahead)===(+o[0])?"selected":""}>${o[1]}</option>`).join("")}</select>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+      <button class="cta" onclick="saveNotifSettings()">Enregistrer</button>
+      <button class="cta ghost" onclick="mailAlertsNow()">✉️ Envoyer le récap maintenant (test)</button>
+    </div>
+    <div class="hint" id="nf-status" style="margin-top:6px">Envoi réel via l'Edge Function <code>send-alerts</code> + Resend — voir <b>NOTIFICATIONS_README.md</b> pour le déploiement (Resend + cron).</div>`;
+}
+async function saveNotifSettings(){
+  const g=id=>{const e=document.getElementById(id);return e?e.value:"";};
+  const ck=id=>{const e=document.getElementById(id);return !!(e&&e.checked);};
+  const row={ organization_id:cloudOrgId, email:(g("nf-email")||"").trim(), enabled:ck("nf-enabled"),
+    digest_enabled:ck("nf-digest"), digest_freq:g("nf-freq")||"daily", digest_hour:parseInt(g("nf-hour"))||6,
+    digest_weekday:parseInt(g("nf-weekday")), instant_enabled:ck("nf-instant"), rdv_enabled:ck("nf-rdv"),
+    rdv_days_ahead:parseInt(g("nf-rdvdays")), updated_at:new Date().toISOString() };
+  try{
+    const c=await sbClient();
+    const { error }=await c.from("notification_settings").upsert(row,{ onConflict:"organization_id" });
+    if(error){ toast("Erreur : "+error.message); return; }
+    DB.meta.reportEmail=row.email; save();
+    toast("Notifications enregistrées ✅");
+  }catch(e){ toast("Cloud indisponible."); }
+}
+async function mailAlertsNow(){
+  const st=document.getElementById("nf-status");
+  if(st) st.innerHTML="⏳ Envoi en cours…";
+  try{
+    const c=await sbClient();
+    const { data, error }=await c.functions.invoke("send-alerts",{ body:{ mode:"ondemand" } });
+    if(error){ if(st) st.innerHTML=`<span style="color:var(--red)">❌ ${esc(error.message)} — la fonction est-elle déployée ? (NOTIFICATIONS_README.md)</span>`; return; }
+    const r=(data&&data.results&&data.results[0])||{};
+    if(r.error){ if(st) st.innerHTML=`<span style="color:var(--red)">❌ ${esc(r.error)}</span>`; return; }
+    if(r.skipped){ if(st) st.innerHTML=`<span style="color:var(--orange)">⚠️ ${esc(r.skipped)} (renseigne un destinataire puis Enregistrer).</span>`; return; }
+    if(st) st.innerHTML=`✅ Récap envoyé (${(r.count!=null?r.count:"?")} alerte(s)). Vérifie ta boîte mail.`;
+    toast("Récap envoyé ✅");
+  }catch(e){ if(st) st.innerHTML=`<span style="color:var(--red)">❌ ${esc(e.message)}</span>`; }
 }
 async function cloudBackupDownload(id){
   try{ const c=await sbClient(); const { data, error }=await c.from("backups").select("created_at,payload").eq("id",id).single();
@@ -3780,10 +3848,13 @@ function openSettings(){
     <div class="field"><label>💾 Sauvegardes automatiques (Cloud)</label>
       <div id="backups-panel"><div class="hint">…</div></div></div>
     <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
+    <div class="field"><label>✉️ Notifications e-mail (récap, alertes, rappels de RDV)</label>
+      <div id="notif-mail-panel"><div class="hint">…</div></div></div>
+    <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
     <div class="field"><label style="color:var(--red)">Zone sensible</label>
       <button class="cta danger sm" onclick="resetData()">Réinitialiser toutes les données</button></div>
     <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Fermer</button><button class="cta" onclick="saveSettings()">Enregistrer</button></div>`);
-  refreshCloudPanel(); refreshBackupsPanel();
+  refreshCloudPanel(); refreshBackupsPanel(); refreshNotifPanel();
 }
 function curSym(c){ return c==="MGA"?"Ar":(c==="USD"?"$":"€"); }
 function curIndicatorText(){ const d=DB.meta.defaultCurrency; return curSym(d)+" · "+CURRENCIES.map(c=>c[0]).filter(c=>c!==d).map(curSym).join(" · "); }
