@@ -1579,6 +1579,68 @@ function scoreGauge(v,label){
   const C=2*Math.PI*42, off=C*(1-v/100);
   return `<div class="gauge"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="#EEE8DC" stroke-width="9"/><circle cx="50" cy="50" r="42" fill="none" stroke="${scoreColor(v)}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" transform="rotate(-90 50 50)"/><text x="50" y="58" text-anchor="middle" font-size="26" font-weight="700" fill="currentColor">${v}</text></svg><div class="gauge-l">${label}</div></div>`;
 }
+/* ---- Portail client (lecture seule) : page à la charte BSM montrant au client ses risques, recos & statuts ---- */
+function clientPortalBody(id){
+  const c=DB.clients.find(x=>x.id===id)||{};
+  const cab=DB.meta.cabinetName||"BSM Advisory & Consulting";
+  const idy=DB.meta.identity||{};
+  const contact=(idy.email||DB.meta.reportEmail||"").trim();
+  const sc=clientScores(id);
+  const rs=DB.risks.filter(r=>r.clientId===id).slice().sort(function(a,b){return b.probabilite*b.impact-a.probabilite*a.impact;});
+  const recos=DB.recommendations.filter(function(r){return r.clientId===id;});
+  const gauge=function(v,label){ const C=2*Math.PI*42, off=(C*(1-v/100)), col=v>=75?"#2F855A":(v>=50?"#C7A25A":"#C0392B");
+    return '<div style="text-align:center;flex:1;min-width:110px"><svg viewBox="0 0 100 100" style="width:86px;height:86px"><circle cx="50" cy="50" r="42" fill="none" stroke="#EEE8DC" stroke-width="9"></circle><circle cx="50" cy="50" r="42" fill="none" stroke="'+col+'" stroke-width="9" stroke-linecap="round" stroke-dasharray="'+C.toFixed(1)+'" stroke-dashoffset="'+off.toFixed(1)+'" transform="rotate(-90 50 50)"></circle><text x="50" y="58" text-anchor="middle" font-size="26" font-weight="700" fill="#0D1F45">'+v+'</text></svg><div style="font-size:12px;color:#6B7280;margin-top:2px">'+label+'</div></div>'; };
+  const nivBg=function(n){ return {CRITIQUE:"#C0392B",HAUTE:"#D97706",MOYENNE:"#C7A25A",FAIBLE:"#2F855A"}[n]||"#6B7280"; };
+  const riskRows=rs.map(function(r){ const s=r.probabilite*r.impact, nv=r5Niveau(s);
+    return '<tr><td>'+esc(r.ref||"—")+'</td><td>'+esc(r.description||r.categorie||"—")+'</td><td style="text-align:center"><b>'+s+'</b></td><td><span style="background:'+nivBg(nv)+';color:#fff;padding:2px 7px;border-radius:4px;font-size:11px">'+nv+'</span></td><td>'+esc(riskStatusLabel(r.status))+'</td><td>'+(r.clientDecision?esc(decisionLabel(r.clientDecision)):"—")+'</td></tr>';
+  }).join("");
+  const recoRows=recos.map(function(r){
+    return '<tr><td>'+esc(r.ref||"—")+'</td><td>'+esc(r.texte||"")+'</td><td>'+esc(r.priorite||"—")+'</td><td style="text-align:center">'+(r.avancement||0)+'%</td><td>'+(r.clientDecision?esc(decisionLabel(r.clientDecision)):"—")+'</td></tr>';
+  }).join("");
+  const logo=DB.meta.logo?('<img src="'+DB.meta.logo+'" style="height:38px;width:auto;vertical-align:middle;margin-right:10px">'):"";
+  return ''
+    +'<div class="ph"><div>'+logo+'<span class="cab">'+esc(cab)+'</span></div>'
+    +'<div class="pm">Espace client · '+esc(c.company||"—")+' · '+frDate(todayISO())+' · <b>Document confidentiel</b></div></div>'
+    +'<h1>Votre gouvernance des risques — méthode R5®</h1>'
+    +'<p>Ce document présente, en toute confidentialité, l\'état de vos risques et des recommandations proposées par '+esc(cab)+'. BSM éclaire vos décisions : <b>les choix vous appartiennent</b>.</p>'
+    +(sc.hasData?('<h2>Scores R5® (sur 100)</h2><div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:space-between;margin:6px 0 4px">'+gauge(sc.maturite,"Maturité")+gauge(sc.resilience,"Résilience")+gauge(sc.gouvernance,"Gouvernance")+gauge(sc.risque,"Maîtrise du risque")+'</div>'):"")
+    +'<h2>Cartographie de vos risques ('+rs.length+')</h2>'
+    +(rs.length?('<table><thead><tr><th>Réf</th><th>Risque</th><th>Criticité</th><th>Niveau</th><th>Traitement</th><th>Votre décision</th></tr></thead><tbody>'+riskRows+'</tbody></table>'):'<p style="color:#6B7280">Aucun risque cartographié à ce jour.</p>')
+    +'<h2>Recommandations ('+recos.length+')</h2>'
+    +(recos.length?('<table><thead><tr><th>Réf</th><th>Recommandation</th><th>Priorité</th><th>Avancement</th><th>Votre décision</th></tr></thead><tbody>'+recoRows+'</tbody></table>'):'<p style="color:#6B7280">Aucune recommandation à ce jour.</p>')
+    +'<div class="cta">Pour <b>valider une recommandation</b>, poser une question ou planifier un point de suivi'+(contact?(' : écrivez-nous à <a href="mailto:'+esc(contact)+'">'+esc(contact)+'</a>'):", contactez votre interlocuteur BSM")+'.</div>'
+    +'<p class="foot">'+esc(cab)+(idy.tel?" · "+esc(idy.tel):"")+' · Document généré le '+frDate(todayISO())+'. Confidentiel — réservé à '+esc(c.company||"votre organisation")+'.</p>';
+}
+function clientPortalHtml(id){
+  const c=DB.clients.find(x=>x.id===id)||{};
+  return '<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Espace client — '+esc(c.company||"")+'</title><style>'
+    +'body{font-family:Arial,Helvetica,sans-serif;color:#1A1A1A;max-width:860px;margin:24px auto;padding:0 22px;line-height:1.55}'
+    +'.ph{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:3px solid #B5923A;padding-bottom:10px;margin-bottom:16px;flex-wrap:wrap;gap:8px}'
+    +'.ph .cab{color:#0D1F45;font-weight:700;font-size:20px;vertical-align:middle}.ph .pm{color:#6B7280;font-size:12px}'
+    +'h1{color:#0D1F45;font-size:20px;margin:14px 0 6px}h2{color:#0D1F45;font-size:15px;border-bottom:1px solid #e5e0d5;padding-bottom:4px;margin:22px 0 8px}'
+    +'table{border-collapse:collapse;width:100%;font-size:13px;margin:6px 0}th{background:#0D1F45;color:#fff;text-align:left;padding:7px 8px;font-size:11.5px}td{padding:7px 8px;border-bottom:1px solid #eee;vertical-align:top}'
+    +'.cta{background:#F3F1E8;border-left:3px solid #B5923A;padding:12px 14px;border-radius:6px;margin:18px 0;font-size:13.5px}a{color:#0D1F45}'
+    +'.foot{color:#6B7280;font-size:11.5px;margin-top:18px;border-top:1px solid #e5e0d5;padding-top:8px}'
+    +'@media print{body{margin:0}}'
+    +'</style></head><body>'+clientPortalBody(id)+'</body></html>';
+}
+function downloadHtmlFile(name, html){
+  try{ const blob=new Blob([html],{type:"text/html;charset=utf-8"}); const url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(url); if(a.parentNode)a.parentNode.removeChild(a); },120);
+  }catch(e){ toast("Téléchargement impossible : "+e.message); }
+}
+function openClientPortal(id){
+  const c=DB.clients.find(x=>x.id===id)||{};
+  openModal('<span class="close" onclick="closeModal()">✕</span>'
+    +'<h2>🔗 Portail client — '+esc(c.company||"")+'</h2>'
+    +'<div class="msub">Page en lecture seule (charte BSM) : le client voit ses scores, risques, recommandations et statuts. Aucune donnée interne ni financière, aucun autre client.</div>'
+    +'<div style="border:1px solid var(--line);border-radius:8px;padding:12px;max-height:52vh;overflow:auto;background:#fff;margin:8px 0 4px">'+clientPortalBody(id)+'</div>'
+    +'<div class="hint">« Télécharger le lien HTML » crée un fichier autonome que vous envoyez au client (par mail). Lecture seule — le retour du client vers le cockpit viendra avec le cloud (étape ultérieure).</div>'
+    +'<div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Fermer</button><button class="cta ghost" onclick="printClientPortal(\''+id+'\')">🖨 Imprimer / PDF</button><button class="cta" onclick="dlClientPortal(\''+id+'\')">⬇ Télécharger le lien HTML</button></div>');
+}
+function printClientPortal(id){ openPrintable(clientPortalHtml(id)); }
+function dlClientPortal(id){ const c=DB.clients.find(x=>x.id===id)||{}; const name="Portail_"+((c.company||"client").replace(/[^A-Za-z0-9._-]+/g,"_"))+".html"; downloadHtmlFile(name, clientPortalHtml(id)); }
 function openClientFiche(id){
   currentClientId=id;
   focusClient=id; // le client ouvert devient le client en focus dans tous les onglets
@@ -1602,7 +1664,7 @@ function renderClientFiche(){
     <button class="backlink" onclick="setScreen('clients')">← Retour aux clients</button>
     <div class="pagetitle">
       <div><h1>${esc(c.company)}</h1><div class="sub">${esc(c.sector||'—')} · <span class="badge ${statusBadge(c.status)}">${cap(c.status)}</span>${c.classification?' · '+classifBadge(c.classification):''}${c.contactName?' · '+esc(c.contactName):''}${c.contactPhone?' · '+esc(c.contactPhone):''}${c.contactEmail?' · '+esc(c.contactEmail):''}</div></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">${canFinance()?`<button class="cta ghost" onclick="aiClientAdvice('${c.id}')">🤖 Conseil IA</button><button class="cta ghost" onclick="printClientReport('${c.id}')">🖨 Rapport</button>`:""}<button class="cta ghost" onclick="openClientForm('${c.id}')">✎ Modifier</button></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${canFinance()?`<button class="cta ghost" onclick="aiClientAdvice('${c.id}')">🤖 Conseil IA</button><button class="cta ghost" onclick="printClientReport('${c.id}')">🖨 Rapport</button>`:""}<button class="cta ghost" onclick="openClientPortal('${c.id}')" title="Page à envoyer au client (lecture seule)">🔗 Portail client</button><button class="cta ghost" onclick="openClientForm('${c.id}')">✎ Modifier</button></div>
     </div>
     <div class="card" style="padding:12px 14px">
       <div style="font-size:11px;color:var(--muted);letter-spacing:.04em;margin-bottom:8px">ALLER DIRECTEMENT À — filtré sur ce client</div>
