@@ -54,6 +54,7 @@
   td{padding:10px;border-bottom:1px solid var(--line);vertical-align:middle;}
   tr:last-child td{border-bottom:none;}
   tbody tr:hover{background:#FCFAF5;}
+  table.clickrows tbody tr:hover{background:#F3F1E8;box-shadow:inset 3px 0 0 var(--gold);}
   .badge{display:inline-block;padding:3px 9px;border-radius:12px;font-size:11px;font-weight:600;white-space:nowrap;}
   .b-actif{background:#E7F3EC;color:var(--green);} .b-prospect{background:#FEF3E2;color:var(--amber);} .b-archive{background:#F1F1F1;color:var(--muted);}
   .b-red{background:#FBEAE8;color:var(--red);} .b-orange{background:#FDF1E3;color:var(--orange);} .b-green{background:#E7F3EC;color:var(--green);} .b-blue{background:#E6EEFB;color:var(--blue);} .b-grey{background:#F1F1F1;color:var(--muted);}
@@ -438,7 +439,7 @@ function defaultDB(){
     employees:[], recruitments:[], leaves:[], activities:[], documents:[], playbooks:[], aiMemory:[], aiChat:[],
     users:[], activityLog:[], notifications:[], moneyRequests:[], investments:[], decisions:[],
     a1vehicles:[], a1logs:[], a1offers:[],
-    advice:{ dismissed:[], edits:{}, custom:[] }
+    advice:{ dismissed:[], edits:{}, custom:[], readIds:[] }
   };
 }
 
@@ -470,6 +471,8 @@ function load(){
   DB.docTemplates=DB.docTemplates||[]; DB.clientDocs=DB.clientDocs||[]; DB.aiUsage=DB.aiUsage||[];
   DB.assistants=DB.assistants||[]; DB.aiSettings=DB.aiSettings||[]; DB.reports=DB.reports||[]; DB.knowledge=DB.knowledge||[];
   if(!DB.meta.assistantsSeeded){ if(!DB.assistants.length){ DB.assistants=defaultAssistants(); DB.aiSettings=[{ id:"main", basePrompt:defaultAiBasePrompt(), routing:defaultAiRouting() }]; } DB.meta.assistantsSeeded=true; }
+  // Migration : la Q&A partait vers HERMÈS (réponses tronquées / renvoi). On la re-route vers l'analyste ATLAS.
+  if(!DB.meta.qaRouteFix){ try{ const st=(DB.aiSettings&&DB.aiSettings[0]); if(st&&st.routing&&st.routing.qa==="a-hermes") st.routing.qa="a-atlas"; }catch(e){} DB.meta.qaRouteFix=true; }
   if(!DB.catalog) DB.catalog=defaultCatalog();
   if(!DB.meta.deck) DB.meta.deck=defaultDeck();
   DB.users.forEach(ensureUserPerms); // matérialise les permissions (migration des comptes existants)
@@ -1550,8 +1553,16 @@ function clientScores(id){
   const nOpen=open.length;
   const avg=nOpen?open.reduce((s,r)=>s+r.probabilite*r.impact,0)/nOpen:0;
   const risque=nOpen?Math.max(0,Math.min(100,Math.round(100-(avg/25*100)))):100;
-  const withOwner=open.filter(r=>(r.responsable||"").trim()).length;
-  const gouvernance=nOpen?Math.round(100*withOwner/nOpen):100;
+  // Gouvernance = niveau RÉEL de gestion des risques identifiés. Identifier sans gérer ≠ gouverner :
+  // moyenne, sur TOUS les risques, de 4 jalons de gestion (responsable · protocole défini · traité/sous contrôle · décision client).
+  // Aucun risque géré / aucun risque identifié → 0 (l'entreprise ne gouverne pas ses risques).
+  const govScore=r=>{ let s=0;
+    if((r.responsable||"").trim()) s++;
+    if(((r.mesures||"").trim())||((r.recoBSM||"").trim())) s++;
+    if(riskControlled(r)||r.status==="traite") s++;
+    if(r.clientDecision) s++;
+    return s/4; };
+  const gouvernance=rs.length?Math.round(100*rs.reduce((a,r)=>a+govScore(r),0)/rs.length):0;
   const crit=open.filter(r=>r.probabilite*r.impact>=15).length;
   const resilience=nOpen?Math.max(0,Math.round(100-(100*crit/nOpen))):100;
   const fam=new Set(rs.map(r=>r.famille).filter(Boolean)).size;
@@ -1640,11 +1651,11 @@ function renderClientFiche(){
     </div>
     ${devisCardHtml(c)}`:""}
     <div class="grid2 wide">
-      <div class="card"><h2>Missions (${miss.length})</h2>${miss.length?`<table><tbody>`+miss.map(m=>`<tr><td><b>${esc(m.ref||'—')}</b> ${esc(m.type||'')}</td><td style="font-size:11.5px;color:var(--muted)">${R5_LABELS[m.phase]||esc(m.phase||'')}</td><td style="text-align:right"><span class="badge ${m.status==='termine'?'b-green':m.status==='suspendue'?'b-grey':'b-blue'}">${m.status==='termine'?'Terminée':m.status==='suspendue'?'Suspendue':'En cours'}</span></td></tr>`).join('')+`</tbody></table>`:`<div class="empty">Aucune mission.</div>`}</div>
+      <div class="card"><h2>Missions (${miss.length})</h2>${miss.length?`<table class="clickrows"><tbody>`+miss.map(m=>`<tr onclick="openMissionForm('${m.id}')" style="cursor:pointer" title="Ouvrir / modifier la mission"><td><b>${esc(m.ref||'—')}</b> ${esc(m.type||'')}</td><td style="font-size:11.5px;color:var(--muted)">${R5_LABELS[m.phase]||esc(m.phase||'')}</td><td style="text-align:right"><span class="badge ${m.status==='termine'?'b-green':m.status==='suspendue'?'b-grey':'b-blue'}">${m.status==='termine'?'Terminée':m.status==='suspendue'?'Suspendue':'En cours'}</span></td></tr>`).join('')+`</tbody></table>`:`<div class="empty">Aucune mission.</div>`}</div>
       <div class="card"><h2>Prochains rendez-vous</h2>${evs.length?`<div class="mini-list">`+evs.slice(0,5).map(e=>`<div class="li"><span><span class="badge ${evBadge(e.type)}">${EVENT_TYPES[e.type]}</span> ${esc(e.title)}</span><span class="d">${frDate(e.date)}</span></div>`).join('')+`</div>`:`<div class="empty">Aucun rendez-vous à venir.</div>`}</div>
     </div>
-    <div class="card"><h2>Risques (${rs.length})</h2><div class="hint" style="margin:-4px 0 8px">Sous contrôle = maîtrisé par un protocole, <b>le risque reste présent</b>.</div>${rs.length?`<table><thead><tr><th>Réf</th><th>Description</th><th>P×I</th><th>Niveau</th><th>Statut</th><th>Décision client</th></tr></thead><tbody>`+rs.map(r=>{const s=r.probabilite*r.impact;return `<tr><td>${esc(r.ref||'—')}</td><td style="max-width:300px">${esc(r.description||r.categorie||'—')}</td><td><b>${s}</b></td><td><span class="badge ${r5Badge(r5Niveau(s))}">${r5Niveau(s)}</span></td><td><span class="badge ${riskControlled(r)?'b-green':(r.status==='traite'?'b-blue':r.status==='en_cours'?'b-orange':'b-grey')}">${riskStatusLabel(r.status)}</span>${reviewDue(r)?' <span class="badge b-orange">à réviser</span>':''}</td><td>${r.clientDecision?`<span class="badge ${decisionBadge(r.clientDecision)}">${decisionLabel(r.clientDecision)}</span>`:'<span style="color:var(--muted)">—</span>'}</td></tr>`;}).join('')+`</tbody></table>`:`<div class="empty">Aucun risque.</div>`}</div>
-    <div class="card"><h2>Recommandations (${recos.length})</h2>${recos.length?`<table><tbody>`+recos.map(r=>`<tr><td><b>${esc(r.ref||'')}</b> ${esc(r.texte||'')}</td><td style="text-align:right"><span class="badge ${recoPrioBadge(r.priorite)}">${esc(r.priorite||'')}</span></td><td>${r.clientDecision?`<span class="badge ${decisionBadge(r.clientDecision)}">${decisionLabel(r.clientDecision)}</span>`:''}</td><td style="width:96px"><div class="progress"><i style="width:${r.avancement||0}%"></i></div></td></tr>`).join('')+`</tbody></table>`:`<div class="empty">Aucune recommandation.</div>`}</div>`;
+    <div class="card"><h2>Risques (${rs.length})</h2><div class="hint" style="margin:-4px 0 8px">Sous contrôle = maîtrisé par un protocole, <b>le risque reste présent</b>.</div>${rs.length?`<table class="clickrows"><thead><tr><th>Réf</th><th>Description</th><th>P×I</th><th>Niveau</th><th>Statut</th><th>Décision client</th></tr></thead><tbody>`+rs.map(r=>{const s=r.probabilite*r.impact;return `<tr onclick="openRiskForm('${r.id}')" style="cursor:pointer" title="Ouvrir / modifier ce risque"><td>${esc(r.ref||'—')}</td><td style="max-width:300px">${esc(r.description||r.categorie||'—')}</td><td><b>${s}</b></td><td><span class="badge ${r5Badge(r5Niveau(s))}">${r5Niveau(s)}</span></td><td><span class="badge ${riskControlled(r)?'b-green':(r.status==='traite'?'b-blue':r.status==='en_cours'?'b-orange':'b-grey')}">${riskStatusLabel(r.status)}</span>${reviewDue(r)?' <span class="badge b-orange">à réviser</span>':''}</td><td>${r.clientDecision?`<span class="badge ${decisionBadge(r.clientDecision)}">${decisionLabel(r.clientDecision)}</span>`:'<span style="color:var(--muted)">—</span>'}</td></tr>`;}).join('')+`</tbody></table>`:`<div class="empty">Aucun risque.</div>`}</div>
+    <div class="card"><h2>Recommandations (${recos.length})</h2>${recos.length?`<table class="clickrows"><tbody>`+recos.map(r=>`<tr onclick="openRecoForm('${r.id}')" style="cursor:pointer" title="Ouvrir / modifier cette recommandation"><td><b>${esc(r.ref||'')}</b> ${esc(r.texte||'')}</td><td style="text-align:right"><span class="badge ${recoPrioBadge(r.priorite)}">${esc(r.priorite||'')}</span></td><td>${r.clientDecision?`<span class="badge ${decisionBadge(r.clientDecision)}">${decisionLabel(r.clientDecision)}</span>`:''}</td><td style="width:96px"><div class="progress"><i style="width:${r.avancement||0}%"></i></div></td></tr>`).join('')+`</tbody></table>`:`<div class="empty">Aucune recommandation.</div>`}</div>`;
 }
 
 /* ----------------------------- Monitoring & suivi de progression ----------------------------- */
@@ -3779,7 +3790,7 @@ function renderAnalyses(){
         <div style="margin-top:10px"><button class="cta ghost sm" onclick="openSettings()">⚙ Configurer la clé IA</button></div></div>
       `}
     </div>`;
-  updateAdviceBadge();
+  markAdviceRead(); // consulter l'onglet marque les alertes comme lues → le badge se vide
 }
 function adviceHtml(a){
   return `<div class="advice ${a.level}">
@@ -3830,9 +3841,20 @@ function saveCustomAdvice(){
   save(); closeModal(); renderAnalyses(); toast("Conseil ajouté.");
 }
 function updateAdviceBadge(){
-  const n=generateAdvice().filter(a=>a.level==="danger").length;
+  const read=new Set(DB.advice.readIds||[]);
+  const n=generateAdvice().filter(a=>a.level==="danger" && !read.has(a.id)).length;
   const b=document.getElementById("nav-advice-badge");
-  b.style.display=n>0?"":"none"; b.textContent=n;
+  if(b){ b.style.display=n>0?"":"none"; b.textContent=n; }
+}
+// Marque comme lues les alertes actuellement affichées (le badge « nouveau » se vide).
+function markAdviceRead(){
+  const ids=generateAdvice().map(a=>a.id);
+  const set=new Set(DB.advice.readIds||[]); let changed=false;
+  ids.forEach(id=>{ if(!set.has(id)){ set.add(id); changed=true; } });
+  // purge les ids lus qui ne correspondent plus à une alerte active
+  DB.advice.readIds=[...set].filter(id=>ids.includes(id));
+  if(changed||true){ save(); }
+  updateAdviceBadge();
 }
 
 /* ----------------------------- Paramètres & sauvegarde ----------------------------- */
@@ -5553,7 +5575,7 @@ function defaultAssistants(){ return [
   { id:"a-hermes", name:"HERMÈS — Conversationnel rapide", icon:"💬", model:"gpt-5.4-mini", maxClassif:"interne", active:true, systemPrompt:"Tu es HERMÈS, l'assistant conversationnel rapide de BSM. Tu réponds aux questions simples avec rapidité, clarté, pédagogie et simplicité, de manière concise. Si la demande nécessite une expertise métier, tu indiques qu'elle doit être transférée à l'assistant spécialisé. Tu ne réalises pas d'analyses complexes, ne rédiges pas de rapports, ne produis pas d'hypothèses non justifiées." },
   { id:"a-hephaistos", name:"HÉPHAÏSTOS — Analyse opérationnelle", icon:"🔧", model:"gpt-5.4", maxClassif:"confidentiel", active:true, systemPrompt:"Tu es HÉPHAÏSTOS, spécialiste de l'analyse opérationnelle des équipements, véhicules, machines et actifs techniques. Tu analyses disponibilités, historiques, coûts, indicateurs, pannes, maintenances et performances ; tu recherches les causes profondes, identifies les anomalies et proposes des optimisations réalistes. Tu présentes toujours : constats, causes, impacts, recommandations. Tu privilégies tableaux, synthèses et indicateurs." }
 ]; }
-function defaultAiRouting(){ return { conseils:"a-atlas", "client-advice":"a-orion", qa:"a-hermes", a1:"a-hephaistos", _default:"a-zeus" }; }
+function defaultAiRouting(){ return { conseils:"a-atlas", "client-advice":"a-orion", qa:"a-atlas", a1:"a-hephaistos", _default:"a-zeus" }; }
 function aiSettings(){ if(!Array.isArray(DB.aiSettings)||!DB.aiSettings.length) DB.aiSettings=[{ id:"main", basePrompt:defaultAiBasePrompt(), routing:defaultAiRouting() }]; return DB.aiSettings[0]; }
 function aiBasePrompt(){ return aiSettings().basePrompt||defaultAiBasePrompt(); }
 function aiRouting(){ return aiSettings().routing||defaultAiRouting(); }
@@ -5780,6 +5802,16 @@ const REPORT_TYPES=[
       {title:"Recommandations en cours", instr:"État d'avancement des recommandations R5 et décisions clients attendues."},
       {title:"Plan d'action priorisé", instr:"Protocoles de réponse réalistes et priorisés (BSM propose, le client décide)."}
     ]},
+  { key:"audit", label:"Rapport d'audit R5", icon:"🛡️", sector:"conseils", classif:"confidentiel", needsMission:true,
+    desc:"Rapport d'audit dédié à UNE mission d'un client — constats, risques, recommandations, plan d'action. Cloisonné par client.",
+    sections:[
+      {title:"Synthèse de l'audit", instr:"Résume les constats majeurs de cette mission d'audit en 4 à 6 lignes, orienté dirigeant du client."},
+      {title:"Périmètre & méthode", instr:"Rappelle le périmètre de la mission, le contexte du client et la méthode R5 appliquée."},
+      {title:"Risques identifiés (P×I)", instr:"Liste les risques de cette mission avec leur score P×I, niveau et statut, du plus critique au moins critique."},
+      {title:"Analyse & vulnérabilités", instr:"Analyse causes, interactions et vulnérabilités principales (méthode R5 · Connect)."},
+      {title:"Recommandations priorisées", instr:"Recommandations réalistes et priorisées (R5 · Respond), en distinguant faits, hypothèses et décisions qui appartiennent au client."},
+      {title:"Plan d'action & jalons", instr:"Plan d'action R5 (Respond → Strengthen) avec jalons et responsabilités proposées."}
+    ]},
   { key:"client", label:"Rapport client 360°", icon:"🏢", sector:"client-advice", classif:"confidentiel", needsClient:true,
     desc:"Fiche 360° stratégique pour un client donné.",
     sections:[
@@ -5819,11 +5851,12 @@ function mdToHtml(md){
 function reportTypeLabel(k){ const t=REPORT_TYPES.find(x=>x.key===k); return t?t.label:k; }
 function repSetType(v){ window.repGenType=v; renderReports(); }
 function repSetFilter(v){ window.repFilter=v; renderReports(); }
-async function generateReport(typeKey, clientId){
+async function generateReport(typeKey, clientId, missionId){
   const rt=REPORT_TYPES.find(t=>t.key===typeKey); if(!rt) return;
   if(!aiProviderConf()){ toast("Configure une clé IA (Mammouth ou Mistral) dans ⚙ Paramètres."); openSettings(); return; }
-  let ctx, title=rt.label;
-  if(rt.needsClient){ const c=DB.clients.find(x=>x.id===clientId); if(!c){ toast("Choisis un client."); return; } ctx=buildClientContext(c); title=rt.label+" — "+c.company; }
+  let ctx, title=rt.label, repClient=clientId||"", repMission="";
+  if(rt.needsMission){ const m=DB.missions.find(x=>x.id===missionId); if(!m){ toast("Choisis une mission d'audit."); return; } ctx=buildMissionAuditContext(m); title=rt.label+" — "+clientName(m.clientId)+(m.ref?" ("+m.ref+")":""); repClient=m.clientId; repMission=m.id; }
+  else if(rt.needsClient){ const c=DB.clients.find(x=>x.id===clientId); if(!c){ toast("Choisis un client."); return; } ctx=buildClientContext(c); title=rt.label+" — "+c.company; repClient=c.id; }
   else ctx=buildAIContext();
   const secs=rt.sections||[{title:rt.label, instr:"Produis le rapport complet."}];
   const btn=document.getElementById("rep-gen-btn"); const done=[];
@@ -5836,8 +5869,10 @@ async function generateReport(typeKey, clientId){
       done.push({ title:secs[i].title, content:String(content||"").trim() });
     }
     const md="# "+title+"\n\n"+done.map(s=>"## "+s.title+"\n\n"+s.content).join("\n\n");
-    const rep={ id:uid(), ts:new Date().toISOString(), type:rt.key, typeLabel:rt.label, title:title, clientId:clientId||"",
-      content:md, sections:done, model:(aiResolve(rt.sector).model||""), author:(currentUser&&currentUser.name)||"", classification:rt.classif };
+    const who=(currentUser&&currentUser.name)||"";
+    const rep={ id:uid(), ts:new Date().toISOString(), type:rt.key, typeLabel:rt.label, title:title, clientId:repClient, missionId:repMission,
+      content:md, sections:done, model:(aiResolve(rt.sector).model||""), author:who, classification:rt.classif,
+      status:"brouillon", trail:[{act:"Généré par l'IA", by:who, at:new Date().toISOString()}] };
     if(!Array.isArray(DB.reports)) DB.reports=[]; DB.reports.unshift(rep); if(DB.reports.length>500) DB.reports=DB.reports.slice(0,500);
     save(); toast("Rapport généré et archivé ("+secs.length+" sections)."); renderReports(); openReport(rep.id);
   }catch(e){ toast("Erreur : "+(e.message||e)); }
@@ -5846,13 +5881,15 @@ async function generateReport(typeKey, clientId){
 function openReport(id){ const r=(DB.reports||[]).find(x=>x.id===id); if(!r) return;
   openModal(`<span class="close" onclick="closeModal()">✕</span>
    <h2 style="margin-bottom:2px">${esc(r.title)}</h2>
-   <div class="msub"><span class="badge b-blue">${esc(reportTypeLabel(r.type))}</span> · ${esc(fmtDateTime(r.ts))} · ${esc(r.author||"")} · modèle ${esc(r.model||"—")}${r.edited?' · <span style="color:var(--muted)">édité</span>':''}</div>
-   <div class="rbody" style="max-height:56vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:16px;margin-top:10px;font-size:13.5px;line-height:1.6">${mdToHtml(r.content)}</div>
+   <div class="msub">${reportStatusBadge(r)} · <span class="badge b-blue">${esc(reportTypeLabel(r.type))}</span> · ${esc(fmtDateTime(r.ts))} · ${esc(r.author||"")} · modèle ${esc(r.model||"—")}${r.edited?' · <span style="color:var(--muted)">édité</span>':''}</div>
+   <div class="rbody" style="max-height:48vh;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:16px;margin-top:10px;font-size:13.5px;line-height:1.6">${mdToHtml(r.content)}</div>
+   ${reportTrailHtml(r)}
    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-     <button class="cta" onclick="printReportPDF('${r.id}')">🖨 PDF</button>
-     <button class="cta ghost" onclick="copyReport('${r.id}')">📋 Copier</button>
-     <button class="cta ghost" onclick="emailReport('${r.id}')">✉️ Email</button>
-     <button class="cta ghost" onclick="editReport('${r.id}')">✎ Éditer</button></div>`);
+     ${reportActionsHtml(r)}
+     <button class="cta ghost" onclick="editReport('${r.id}')">✎ Éditer</button>
+     <button class="cta ghost" onclick="printReportPDF('${r.id}')">🖨 PDF</button>
+     <button class="cta ghost" onclick="copyReport('${r.id}')">📋 Copier</button></div>
+   <div class="hint" style="margin-top:8px">L'envoi au client n'est possible qu'une fois le rapport <b>Validé</b> (contrôle de bout en bout). Toute édition d'un rapport validé le repasse en brouillon.</div>`);
 }
 function editReport(id){ const r=(DB.reports||[]).find(x=>x.id===id); if(!r) return;
   openModal(`<span class="close" onclick="closeModal()">✕</span><h2>✎ ${esc(r.title)}</h2>
@@ -5860,7 +5897,79 @@ function editReport(id){ const r=(DB.reports||[]).find(x=>x.id===id); if(!r) ret
    <textarea id="rep-edit" rows="20" style="width:100%;padding:12px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:12.5px;line-height:1.5">${esc(r.content)}</textarea>
    <div style="display:flex;gap:8px;margin-top:10px"><button class="cta" onclick="saveReportEdit('${r.id}')">💾 Enregistrer</button><button class="cta ghost" onclick="openReport('${r.id}')">Annuler</button></div>`);
 }
-function saveReportEdit(id){ const r=(DB.reports||[]).find(x=>x.id===id); if(!r) return; r.content=val("rep-edit"); r.edited=true; save(); openReport(id); toast("Rapport mis à jour."); }
+function saveReportEdit(id){ const r=(DB.reports||[]).find(x=>x.id===id); if(!r) return; r.content=val("rep-edit"); r.edited=true;
+  // Intégrité : éditer un rapport déjà validé/soumis le repasse en brouillon (il faudra le re-valider avant envoi).
+  if(reportStatus(r)==="valide"||reportStatus(r)==="a_valider"){ r.status="brouillon"; (r.trail=r.trail||[]).push({act:"Modifié → repassé en brouillon", by:(currentUser&&currentUser.name)||"", at:new Date().toISOString()}); }
+  save(); openReport(id); toast("Rapport mis à jour."); }
+/* ---- Circuit de validation des rapports (Brouillon → À valider → Validé → Envoyé) + traçabilité ---- */
+const REPORT_STATUSES={ brouillon:{label:"Brouillon",badge:"b-grey"}, a_valider:{label:"À valider",badge:"b-orange"}, valide:{label:"Validé",badge:"b-blue"}, envoye:{label:"Envoyé au client",badge:"b-green"} };
+function reportStatus(r){ return r.status||"brouillon"; }
+function reportStatusBadge(r){ const s=REPORT_STATUSES[reportStatus(r)]||REPORT_STATUSES.brouillon; return `<span class="badge ${s.badge}">${s.label}</span>`; }
+function setReportStatus(id,status){
+  const r=(DB.reports||[]).find(x=>x.id===id); if(!r) return;
+  if(status==="valide" && !isDirection()){ toast("Validation réservée à la direction."); return; }
+  if(status==="brouillon" && reportStatus(r)==="valide" && !isDirection()){ toast("Dévalidation réservée à la direction."); return; }
+  const who=(currentUser&&currentUser.name)||"";
+  const lbl={a_valider:"Soumis à validation",valide:"Validé",brouillon:"Repassé en brouillon"};
+  r.status=status; (r.trail=r.trail||[]).push({act:lbl[status]||status, by:who, at:new Date().toISOString()});
+  if(status==="valide"){ r.validatedBy=who; r.validatedAt=new Date().toISOString(); }
+  save(); openReport(id); if(typeof renderReports==="function") renderReports(); toast("Rapport : "+((REPORT_STATUSES[status]||{}).label||status)+".");
+}
+function reportActionsHtml(r){
+  const s=reportStatus(r), dir=isDirection(); let a="";
+  if(s==="brouillon") a+=`<button class="cta" onclick="setReportStatus('${r.id}','a_valider')">Soumettre à validation</button>`;
+  if(s==="a_valider"){ if(dir) a+=`<button class="cta" onclick="setReportStatus('${r.id}','valide')">✓ Valider</button>`; a+=`<button class="cta ghost" onclick="setReportStatus('${r.id}','brouillon')">↩ Brouillon</button>`; }
+  if(s==="valide"){ a+=`<button class="cta gold" onclick="openReportSend('${r.id}')">✉️ Envoyer au client</button>`; if(dir) a+=`<button class="cta ghost" onclick="setReportStatus('${r.id}','brouillon')">↩ Brouillon</button>`; }
+  if(s==="envoye"){ a+=`<button class="cta ghost" onclick="openReportSend('${r.id}')">✉️ Renvoyer au client</button>`; }
+  return a;
+}
+function reportTrailHtml(r){
+  const tr=r.trail||[]; if(!tr.length && !r.sentAt) return "";
+  const rows=tr.map(x=>`<div class="li"><span>${esc(x.act)}${x.by?" · "+esc(x.by):""}</span><span class="d">${esc(fmtDateTime(x.at))}</span></div>`).join("");
+  return `<div style="margin-top:10px"><div style="font-size:10.5px;color:var(--muted);letter-spacing:.04em;margin-bottom:4px">JOURNAL (traçabilité)</div><div class="mini-list">${rows}</div></div>`;
+}
+// Envoi client sécurisé : bloqué si non validé, garde-fou confidentialité, aperçu + PDF joint, journal.
+function openReportSend(id){
+  const r=(DB.reports||[]).find(x=>x.id===id); if(!r) return;
+  if(reportStatus(r)!=="valide" && reportStatus(r)!=="envoye"){ toast("Validez d'abord le rapport avant l'envoi au client."); return; }
+  if(r.classification==="tres_confidentiel" && !window.__reportUnlockConf){
+    confirmModal("Rapport « Très confidentiel »","Ce rapport est classé <b>Très confidentiel</b>. Confirmez-vous son envoi externe à un client ?",()=>{ window.__reportUnlockConf=true; openReportSend(id); });
+    return;
+  }
+  const c=DB.clients.find(x=>x.id===r.clientId)||{};
+  const to=(c.contactEmail||"").trim();
+  openModal(`<span class="close" onclick="closeModal()">✕</span>
+    <h2>✉ Envoyer au client — ${esc(r.title)}</h2>
+    <div class="msub">Contrôlez destinataire et contenu avant l'envoi réel. Le rapport part en <b>PDF joint</b>.</div>
+    <div class="mini-list" style="margin:8px 0 10px">
+      <div class="li"><span>Client</span><b>${esc(r.clientId?clientName(r.clientId):"—")}</b></div>
+      <div class="li"><span>Statut</span><b>${reportStatusBadge(r)}</b></div>
+      <div class="li"><span>Confidentialité</span><b>${esc(r.classification||"confidentiel")}</b></div>
+    </div>
+    <div class="field"><label>Destinataire (e-mail client)</label><input id="rsend-to" value="${esc(to)}" placeholder="client@exemple.com"></div>
+    <div class="field"><label>Objet</label><input id="rsend-subject" value="[BSM] ${esc(r.title)}"></div>
+    <div class="field"><label>Message d'accompagnement (option)</label><textarea id="rsend-msg" rows="2" style="width:100%;font-family:inherit;padding:8px;border:1px solid var(--line);border-radius:8px"></textarea></div>
+    <div class="field"><label>Aperçu (= PDF joint)</label><div style="border:1px solid var(--line);border-radius:8px;padding:10px;max-height:240px;overflow:auto;background:#fff;font-size:12.5px">${mdToHtml(r.content)}</div></div>
+    ${to?"":'<div class="hint" style="color:var(--orange)">⚠ Aucune adresse sur la fiche client — saisissez-la ci-dessus.</div>'}
+    <div class="modal-actions"><button class="cta ghost" onclick="downloadReportPDF('${r.id}')">⬇ PDF</button><button class="cta ghost" onclick="openReport('${r.id}')">Annuler</button><button class="cta" onclick="sendReportToClient('${r.id}')">Envoyer au client</button></div>`);
+}
+function downloadReportPDF(id){ printReportPDF(id); }
+async function sendReportToClient(id){
+  const r=(DB.reports||[]).find(x=>x.id===id); if(!r) return;
+  const to=(val("rsend-to")||"").trim(); if(!to){ toast("Renseignez l'adresse e-mail du client."); return; }
+  const subject=(val("rsend-subject")||("[BSM] "+r.title)).trim();
+  const msg=(val("rsend-msg")||"").trim();
+  const doc=reportHtml(r);
+  const body=(msg?`<p style="font-family:Arial,sans-serif;font-size:14px">${esc(msg)}</p>`:"")+doc;
+  const who=(currentUser&&currentUser.name)||"";
+  try{
+    await googleCall("mail",{ to, subject, html:body, pdfHtml:doc, pdfName:(r.title||"rapport").replace(/[^A-Za-z0-9._-]+/g,"_") });
+    r.status="envoye"; r.sentAt=new Date().toISOString(); r.sentBy=who; r.sentTo=to;
+    (r.trail=r.trail||[]).push({act:"Envoyé au client ("+to+")", by:who, at:r.sentAt});
+    window.__reportUnlockConf=false;
+    save(); closeModal(); if(typeof renderReports==="function") renderReports(); toast("Rapport envoyé à "+to+" ✅");
+  }catch(e){ toast("Échec de l'envoi : "+(e.message||e)); }
+}
 function reportHtml(r){
   return "<!doctype html><html><head><meta charset=\"utf-8\"><title>"+esc(r.title)+"</title><style>"
    +"body{font-family:Georgia,'Times New Roman',serif;color:#1A1A1A;max-width:820px;margin:24px auto;padding:0 26px;line-height:1.6}"
@@ -5892,12 +6001,12 @@ function renderReports(){
       <td style="white-space:nowrap">${esc(fmtDateTime(r.ts))}</td>
       <td><span class="badge b-blue">${esc(reportTypeLabel(r.type))}</span></td>
       <td><b>${esc(r.title)}</b></td>
+      <td>${reportStatusBadge(r)}</td>
       <td>${typeof classifBadge==="function"?classifBadge(r.classification):esc(r.classification||"")}</td>
       <td style="text-align:right;white-space:nowrap">
         <button class="cta ghost sm" onclick="openReport('${r.id}')">Voir</button>
+        ${r.clientId?`<button class="cta ghost sm" onclick="openReportSend('${r.id}')" title="Envoyer au client (après validation)">✉️</button>`:""}
         <button class="cta ghost sm" onclick="printReportPDF('${r.id}')" title="PDF">🖨</button>
-        <button class="cta ghost sm" onclick="copyReport('${r.id}')" title="Copier">📋</button>
-        <button class="cta ghost sm" onclick="emailReport('${r.id}')" title="Email">✉️</button>
         <button class="cta ghost sm" style="color:var(--red)" onclick="deleteReport('${r.id}')" title="Supprimer">🗑</button></td></tr>`).join("");
   const assistant=aiAssistantForSector(rt.sector); const prov=aiProviderConf();
   host.innerHTML=`
@@ -5906,15 +6015,16 @@ function renderReports(){
       <h2 style="margin-top:0">Générer un rapport</h2>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
         <div class="field" style="margin:0;min-width:280px"><label>Type de rapport</label><select id="rep-type" onchange="repSetType(this.value)">${typeOpts}</select></div>
+        ${rt.needsMission?`<div class="field" style="margin:0;min-width:260px"><label>Mission d'audit</label><select id="rep-mission">${missionOptions("","")}</select></div>`:""}
         ${rt.needsClient?`<div class="field" style="margin:0"><label>Client</label><select id="rep-client">${DB.clients.map(c=>`<option value="${c.id}">${esc(c.company)}</option>`).join("")}</select></div>`:""}
-        <button class="cta" id="rep-gen-btn" onclick="generateReport(document.getElementById('rep-type').value, document.getElementById('rep-client')?document.getElementById('rep-client').value:'')">✦ Générer le rapport</button>
+        <button class="cta" id="rep-gen-btn" onclick="generateReport(document.getElementById('rep-type').value, (document.getElementById('rep-client')||{}).value||'', (document.getElementById('rep-mission')||{}).value||'')">✦ Générer le rapport</button>
       </div>
       <div class="hint" style="margin-top:8px">${esc(rt.desc||"")} Assistant utilisé : <b>${esc((assistant&&assistant.name)||"—")}</b>${prov?` (${esc(prov.name==='mammouth'?((assistant&&assistant.model)||prov.model):prov.model)})`:''}. Le rapport est daté, archivé ci-dessous et exportable immédiatement.</div>
     </div>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><h2 style="margin:0">Archive des rapports (${(DB.reports||[]).length})</h2><div style="display:flex;gap:6px;flex-wrap:wrap">${filterChips}</div></div>
-      <table style="margin-top:10px"><thead><tr><th>Date</th><th>Type</th><th>Titre</th><th>Confid.</th><th style="text-align:right">Actions</th></tr></thead>
-      <tbody>${rows||'<tr><td colspan="5"><div class="empty">Aucun rapport encore. Génère ton premier rapport ci-dessus.</div></td></tr>'}</tbody></table>
+      <table style="margin-top:10px"><thead><tr><th>Date</th><th>Type</th><th>Titre</th><th>Statut</th><th>Confid.</th><th style="text-align:right">Actions</th></tr></thead>
+      <tbody>${rows||'<tr><td colspan="6"><div class="empty">Aucun rapport encore. Génère ton premier rapport ci-dessus.</div></td></tr>'}</tbody></table>
     </div>`;
 }
 function buildAIContext(){
@@ -5951,6 +6061,22 @@ function buildClientContext(c){
   if(recos.length){ t+=`Recommandations :\n`; recos.forEach(r=>{ t+=`- ${r.texte} (${r.priorite||""}, ${r.avancement||0}%)\n`; }); }
   return t.length>5000?t.slice(0,5000)+"…":t;
 }
+// Contexte CLOISONNÉ d'une mission d'audit : uniquement le client concerné + les risques liés à CETTE mission.
+function buildMissionAuditContext(m){
+  const c=DB.clients.find(x=>x.id===m.clientId)||{};
+  const mrs=DB.risks.filter(r=>r.missionId===m.id);
+  const risks=(mrs.length?mrs:DB.risks.filter(r=>r.clientId===m.clientId)).slice().sort((a,b)=>b.probabilite*b.impact-a.probabilite*a.impact);
+  const recos=DB.recommendations.filter(r=>r.clientId===m.clientId);
+  const sc=clientScores(m.clientId);
+  let t=`RAPPORT D'AUDIT — Client : ${c.company||"—"} (secteur ${c.sector||"—"}).\n`;
+  t+=`Mission : ${(m.ref?m.ref+" — ":"")+(m.type||"Audit")} · phase ${R5_LABELS[m.phase]||m.phase||""} · statut ${m.status||""}${m.startDate?" · débutée le "+frDate(m.startDate):""}.\n`;
+  if(sc.hasData) t+=`Scores R5 (/100) : maturité ${sc.maturite}, résilience ${sc.resilience}, gouvernance ${sc.gouvernance}, maîtrise du risque ${sc.risque}.\n`;
+  if(m.notes) t+=`Notes de mission : ${m.notes}\n`;
+  if(risks.length){ t+=`Risques (${risks.length}) :\n`; risks.forEach(r=>{ t+=`- [${r.ref||""}] ${r.famille||""}/${r.categorie||""} : ${r.description||""} (P${r.probabilite}×I${r.impact}=${r.probabilite*r.impact}, ${r5Niveau(r.probabilite*r.impact)}, statut ${r.status||""}${r.responsable?", resp. "+r.responsable:""}${r.mesures?", protocole : "+r.mesures:""}${r.clientDecision?", décision client : "+r.clientDecision:""})\n`; }); }
+  else t+=`Aucun risque encore saisi pour cette mission.\n`;
+  if(recos.length){ t+=`Recommandations (${recos.length}) :\n`; recos.forEach(r=>{ t+=`- [${r.ref||""}] ${r.texte} (priorité ${r.priorite||"—"}, avancement ${r.avancement||0}%${r.clientDecision?", décision client : "+r.clientDecision:""})\n`; }); }
+  return t.length>6500?t.slice(0,6500)+"…":t;
+}
 async function aiGenerateAdvice(){
   const btn=document.getElementById("ai-gen-btn"), out=document.getElementById("ai-advice-out");
   if(!out) return;
@@ -5958,7 +6084,7 @@ async function aiGenerateAdvice(){
   out.innerHTML=`<div class="hint">Génération en cours…</div>`;
   try{
     const sys="Tu es un consultant senior en gouvernance des risques chez BSM Advisory & Consulting (méthode R5, Madagascar). À partir des données du portefeuille, propose 3 à 5 conseils d'action concrets et priorisés, chacun en 1-2 phrases, orientés décision. Précis et actionnable. Format : liste à puces, sans préambule ni conclusion.";
-    const res=await aiChat(sys, "Données du portefeuille :\n"+buildAIContext(), 900, "conseils");
+    const res=await aiChat(sys, "Données du portefeuille :\n"+buildAIContext(), 1600, "conseils");
     lastAIAdvice=res;
     out.innerHTML=`<div class="advice info"><div class="ic">🤖</div><div class="body"><div class="t">Conseils générés par l'IA</div><div class="x" style="white-space:pre-wrap">${esc(res)}</div></div></div>
       <div style="display:flex;gap:8px;margin-top:6px"><button class="cta ghost sm" onclick="aiSaveAdvice()">+ Ajouter aux conseils</button><button class="cta ghost sm" onclick="aiGenerateAdvice()">↻ Régénérer</button></div>`;
@@ -5977,8 +6103,8 @@ async function aiAskQuestion(){
   if(btn){ btn.disabled=true; btn.textContent="⏳"; }
   if(out) out.innerHTML=`<div class="hint">Recherche…</div>`;
   try{
-    const sys="Tu es l'assistant analytique de BSM Advisory & Consulting. Réponds à la question uniquement à partir des données fournies. Si l'information n'y figure pas, dis-le clairement. Concis et factuel.";
-    const res=await aiChat(sys, "Données :\n"+buildAIContext()+"\n\nQuestion : "+q, 600, "qa");
+    const sys="Tu es l'analyste de BSM Advisory & Consulting. Réponds de façon COMPLÈTE et structurée (méthode R5, ton institutionnel BSM), uniquement à partir des données fournies. Si l'information n'y figure pas, dis-le clairement. Ne renvoie jamais vers un autre assistant : traite la demande toi-même.";
+    const res=await aiChat(sys, "Données :\n"+buildAIContext()+"\n\nQuestion : "+q, 1400, "qa");
     if(out) out.innerHTML=`<div class="advice good"><div class="ic">💬</div><div class="body"><div class="x" style="white-space:pre-wrap">${esc(res)}</div></div></div>`;
   }catch(e){ if(out) out.innerHTML=`<div class="imp-err">⚠ ${esc(e.message)}</div>`; }
   if(btn){ btn.disabled=false; btn.textContent="Demander"; }
@@ -5989,7 +6115,7 @@ async function aiClientAdvice(id){
   openModal(`<span class="close" onclick="closeModal()">✕</span><h2>🤖 Conseil IA — ${esc(c.company)}</h2><div class="msub">Généré à partir des données de ce client.</div><div id="cai-out"><div class="hint">Génération en cours…</div></div>`);
   try{
     const sys="Tu es consultant senior en gouvernance des risques chez BSM Advisory & Consulting (méthode R5). Rédige pour ce client : une synthèse de suivi (2-3 phrases) puis 3 conseils d'action priorisés, concrets et actionnables. Concis, orienté décision, sans préambule.";
-    const res=await aiChat(sys, buildClientContext(c), 900, "client-advice");
+    const res=await aiChat(sys, buildClientContext(c), 1400, "client-advice");
     window.__caiRes=res; window.__caiId=id;
     const el=document.getElementById("cai-out");
     if(el) el.innerHTML=`<div style="white-space:pre-wrap;font-size:13.5px;line-height:1.6">${esc(res)}</div>
@@ -6035,7 +6161,7 @@ async function sendAiChat(){
   try{
     const history=DB.aiChat.slice(-20).map(function(m){return{role:m.role,content:m.content};});
     const _z=aiResolve("_default");
-    const res=await aiComplete([{role:"system",content:aiSystemPrompt()}].concat(history), 900, "_default", _z.model);
+    const res=await aiComplete([{role:"system",content:aiSystemPrompt()}].concat(history), 1400, "_default", _z.model);
     DB.aiChat.push({role:"assistant",content:res}); save(); renderAiChat();
   }catch(e){ if(typing) typing.textContent="⚠ "+e.message; }
 }
