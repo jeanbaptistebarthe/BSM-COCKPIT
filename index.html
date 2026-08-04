@@ -430,7 +430,7 @@ function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(
 
 function defaultDB(){
   return {
-    meta:{ version:2, defaultCurrency:"MGA", rateEurMga:5000, rateUsdMga:4500, created:todayISO(), r5SheetId:"", taxRate:20, amort:0, financier:0,
+    meta:{ version:2, defaultCurrency:"MGA", rateEurMga:5000, rateUsdMga:4500, created:todayISO(), r5SheetId:"", taxRate:20, amort:0, financier:0, recurHorizonMonths:12,
       legalMg:{ dureeHebdo:40, dureeMensuelle:173.33, congesParMois:2.5, cnapsSal:1, cnapsPat:13, ostieSal:1, ostiePat:5 } },
     recurring:[], jobs:[], primes:[], devis:[],
     clients:[], events:[], transactions:[],
@@ -503,6 +503,8 @@ function ymKey(dstr){ const p=(dstr||"").split("-"); const y=parseInt(p[0]); con
 function freqMonths(f){ return f==="annuel"?12:(f==="trimestriel"?3:1); }
 function freqLabel(f){ return f==="annuel"?"Annuel":(f==="trimestriel"?"Trimestriel":"Mensuel"); }
 function freqUnit(f){ return f==="annuel"?"an":(f==="trimestriel"?"trimestre":"mois"); }
+// Horizon de projection des récurrents (abonnements/charges), en mois glissants — réglable dans Paramètres (défaut 12).
+function recurHorizon(){ return Math.max(1, Math.min(120, parseInt(DB.meta&&DB.meta.recurHorizonMonths)||12)); }
 // Mode de facturation d'une mission — rétro-compatible avec l'ancien booléen m.forfait.
 function missionBilling(m){ return (m&&m.billing) || (m&&m.forfait?"forfait":"ponctuel"); }
 // Le récurrent (abonnement/honoraires) lié à une mission, s'il existe.
@@ -511,8 +513,10 @@ function missionRef(mid){ const m=DB.missions.find(x=>x.id===mid); return m?((m.
 function generateRecurring(){
   if(!DB.recurring||!DB.recurring.length) return 0;
   const now=new Date(), curKey=now.getFullYear()*12+now.getMonth();
-  // On projette jusqu'à décembre de l'année courante → les échéances à venir comptent dans le compte de résultat (prévisionnel).
-  const horizon=Math.max(curKey, now.getFullYear()*12+11);
+  // Horizon glissant réglable (défaut 12 mois), avec plancher = décembre de l'année courante
+  // → les échéances à venir comptent dans le compte de résultat prévisionnel, et un contrat pluriannuel
+  //   (ex. offre sur 36 mois) est projeté d'avance si l'horizon est réglé en conséquence.
+  const horizon=Math.max(curKey+recurHorizon(), now.getFullYear()*12+11);
   let created=0;
   DB.recurring.forEach(rc=>{
     if(rc.active===false) return;
@@ -1451,7 +1455,8 @@ function openClientForm(id){
     <div class="field row2"><label>Contact</label>
       <input id="f-cname" placeholder="Nom du contact" value="${esc(c.contactName||'')}">
       <input id="f-cphone" placeholder="Téléphone" value="${esc(c.contactPhone||'')}"></div>
-    <div class="field"><label>Email</label><input id="f-cemail" value="${esc(c.contactEmail||'')}"></div>
+    <div class="field row2"><label>Email & trigramme (n° de facture)</label><input id="f-cemail" placeholder="Email" value="${esc(c.contactEmail||'')}">
+      <input id="f-ctrigram" maxlength="4" placeholder="Ex. ACM" value="${esc(c.trigram||'')}" style="text-transform:uppercase" title="3 lettres identifiant le client dans les numéros de facture (ex. FAC-2026-ACM-001). Vide = déduit du nom."></div>
     <div class="field row2"><label>Statut & responsable</label><select id="f-status">
       ${["prospect","actif","archive"].map(s=>`<option value="${s}" ${c.status===s?'selected':''}>${cap(s)}</option>`).join("")}</select>
       <select id="f-cresp"><option value="">— Responsable non attribué —</option>${(DB.users||[]).filter(u=>u.active!==false).map(u=>`<option value="${esc(u.login)}" ${c.responsable===u.login?'selected':''}>${esc(u.name||u.login)}</option>`).join("")}</select></div>
@@ -1482,7 +1487,7 @@ function saveClient(id){
   const company=val("f-company").trim();
   if(!company){ toast("Le nom de la société est obligatoire."); return; }
   const obj={ company, sector:val("f-sector"), contactName:val("f-cname"), contactPhone:val("f-cphone"),
-    contactEmail:val("f-cemail"), status:val("f-status"), responsable:val("f-cresp"), classification:val("f-cclassif"), notes:val("f-notes"),
+    contactEmail:val("f-cemail"), trigram:(val("f-ctrigram")||"").toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,4), status:val("f-status"), responsable:val("f-cresp"), classification:val("f-cclassif"), notes:val("f-notes"),
     signatureDate:val("f-sign"), contractType:val("f-ctype"), ndaSigned:document.getElementById("f-cnda").checked,
     ndaDate:val("f-cndadate"), contractInfo:val("f-cinfo"), missionSummary:val("f-msum"), followupSummary:val("f-fsum"),
     fichesDues:document.getElementById("f-cfiches").checked };
@@ -2869,6 +2874,7 @@ function renderBudget(){
     ${validationPanelHtml()}
     ${focusBanner()}
     ${invoicePanelHtml()}
+    ${awaitingPanelHtml()}
     <div class="kpis">
       <div class="kpi"><div class="v good">${fmtD(encaisse)}</div><div class="l">Entrées encaissées ${y}</div></div>
       <div class="kpi"><div class="v">${fmtD(prevuIn)}</div><div class="l">Entrées prévues (à venir)</div></div>
@@ -3889,6 +3895,9 @@ function openSettings(){
     <div class="field"><label>Révision des risques — les risques sont mobiles</label>
       <select id="s-reviewmonths">${[3,6,12].map(m=>`<option value="${m}" ${reviewMonths()===m?'selected':''}>Tous les ${m} mois</option>`).join("")}</select>
       <div class="hint">Un risque « sous contrôle » non revu depuis cette durée est signalé « à réviser » (phase REVIEW).</div></div>
+    <div class="field"><label>🔁 Projection des abonnements récurrents (mois d'avance)</label>
+      <select id="s-recurhorizon">${[12,18,24,36,48,60].map(m=>`<option value="${m}" ${recurHorizon()===m?'selected':''}>${m} mois${m===12?" (défaut)":""}${m>=36?" — contrats pluriannuels":""}</option>`).join("")}</select>
+      <div class="hint">Nombre de mois d'échéances générées d'avance pour chaque abonnement (dans la limite de sa date de fin). Ex. offre sur <b>36 mois</b> → réglez sur 36 pour voir tout le contrat dans le Budget/CA. Le compte de résultat reste annuel (chaque échéance compte dans son exercice).</div></div>
     <hr style="border:none;border-top:1px solid var(--line);margin:16px 0">
     <div class="field"><label>Sauvegarde</label>
       <div style="display:flex;gap:8px"><button class="cta ghost sm" onclick="exportData()">⬇ Exporter un fichier</button>
@@ -3923,6 +3932,7 @@ function saveSettings(){
   DB.meta.mammouthKey=val("s-mammouth").trim(); DB.meta.aiModelMammouth=val("s-aimodel-mam");
   DB.meta.reportEmail=val("s-reportmail").trim();
   const rm=parseInt(val("s-reviewmonths")); if([3,6,12].includes(rm)) DB.meta.reviewMonths=rm;
+  const rh=parseInt(val("s-recurhorizon")); if(!isNaN(rh)&&rh>=1&&rh<=120){ DB.meta.recurHorizonMonths=rh; generateRecurring(); }
   DB.meta.identity={ nom:val("s-id-nom").trim(), titre:val("s-id-titre").trim(), rs:val("s-id-rs").trim(),
     adr:val("s-id-adr").trim(), email:val("s-id-email").trim(), tel:val("s-id-tel").trim(),
     nif:val("s-id-nif").trim(), stat:val("s-id-stat").trim() };
@@ -4213,6 +4223,52 @@ function billableInvoices(pending){
   return DB.transactions.filter(t=>t.invoice && t.sens==="entrant" && inEntity(t) && (!pending || !t.emailedAt))
     .sort((a,b)=>String(a.dueDate||a.date).localeCompare(String(b.dueDate||b.date)));
 }
+// --- Relances de factures impayées (cadence : J+7 après échéance, puis toutes les 2 semaines) ---
+function addDaysISO(iso,n){ const d=new Date((iso||todayISO())+"T00:00:00"); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); }
+function invoiceReminders(t){ return t.reminders||[]; }
+// Date à laquelle la prochaine relance est due, ou null si non concernée (facture envoyée, échue, non encaissée).
+function reminderDueDate(t){
+  if(!(t.invoice && t.sens==="entrant" && t.emailedAt && t.status!=="realise")) return null;
+  const due=t.dueDate||t.date; if(!due) return null;
+  const rem=invoiceReminders(t);
+  return rem.length ? addDaysISO(rem[rem.length-1],14) : addDaysISO(due,7);
+}
+function invoicesToRemind(){
+  const today=todayISO();
+  return DB.transactions.filter(t=>{ const d=reminderDueDate(t); return d && d<=today && inEntity(t); })
+    .sort((a,b)=>String(a.dueDate||a.date).localeCompare(String(b.dueDate||b.date)));
+}
+function reminderMessage(t){
+  const n=invoiceReminders(t).length, no=t.invoiceNo||"", due=frDate(t.dueDate||t.date);
+  if(n===0) return "Sauf erreur de notre part, la facture "+no+" (échéance "+due+") demeure impayée à ce jour. Nous vous remercions de bien vouloir procéder à son règlement.";
+  if(n===1) return "Nous revenons vers vous concernant la facture "+no+" (échéance "+due+"), toujours en attente de règlement. Merci de bien vouloir régulariser dans les meilleurs délais.";
+  return "Malgré nos précédentes relances, la facture "+no+" (échéance "+due+") reste impayée. Nous vous invitons à procéder au règlement sans délai.";
+}
+// Toutes les factures émises (envoyées) et non encaissées — vue unique du poste clients.
+function invoicesAwaiting(){
+  return DB.transactions.filter(t=>t.invoice && t.sens==="entrant" && t.emailedAt && t.status!=="realise" && inEntity(t))
+    .sort((a,b)=>String(a.dueDate||a.date).localeCompare(String(b.dueDate||b.date)));
+}
+function awaitingPanelHtml(){
+  if(!isDirection()) return "";
+  const list=invoicesAwaiting(); if(!list.length) return "";
+  const today=todayISO();
+  const remindIds=new Set(invoicesToRemind().map(t=>t.id));
+  const totalDue=list.reduce((s,t)=>s+toDefault(t.amount,t.currency),0);
+  const rows=list.map(t=>{
+    const late=(t.dueDate||t.date)<today;
+    const daysLate=Math.max(0,Math.round((new Date(today)-new Date((t.dueDate||t.date)+"T00:00:00"))/86400000));
+    const remDue=remindIds.has(t.id), nR=invoiceReminders(t).length;
+    return `<div class="li"><span><b>${esc(t.invoiceNo||t.label)}</b> · ${esc(clientName(t.clientId))}${remDue?' <span class="badge b-orange">à relancer</span>':''}<br><span style="color:var(--muted);font-size:11px">échéance ${frDate(t.dueDate||t.date)}${late?` · en retard ${daysLate} j`:''}${nR?` · ${nR} relance${nR>1?"s":""} envoyée${nR>1?"s":""}`:''}</span></span>
+      <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><b>${fmt(t.amount,t.currency)}</b>
+        <button class="cta ghost sm" onclick="openInvoiceSend('${t.id}','relance')" title="Envoyer une relance (après aperçu)">🔔 Relancer</button>
+        <button class="cta sm" onclick="markRealise('${t.id}')" title="Confirmer l'encaissement (mode + date)">✓ Encaissé</button></span></div>`;
+  }).join("");
+  return `<div class="card" style="border-left:3px solid var(--orange)">
+    <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">📌 Factures en attente de règlement (${list.length})</h2><b style="color:var(--orange)">${fmtD(totalDue)}</b></div>
+    <div class="hint" style="margin:6px 0 8px">Factures émises non encaissées.${remindIds.size?` <b>${remindIds.size}</b> à relancer (cadence J+7 puis 2 semaines).`:""} Cliquez « ✓ Encaissé » à réception du règlement.</div>
+    <div class="mini-list">${rows}</div></div>`;
+}
 // Panneau « Factures à envoyer » injecté dans le Budget (direction).
 function invoicePanelHtml(){
   if(!isDirection()) return "";
@@ -4230,51 +4286,117 @@ function invoicePanelHtml(){
     <div class="hint" style="margin:6px 0 8px">Échéances d'abonnement / facturation à transmettre au client. Vous contrôlez puis envoyez : <b>vrai e-mail</b> via le pont Google.</div>
     <div class="mini-list">${rows}</div></div>`;
 }
-function openInvoiceSend(txId){
+// Trigramme client pour les n° de facture : champ saisi, sinon déduit du nom (3 lettres).
+function clientTrigram(clientId){
+  const c=DB.clients.find(x=>x.id===clientId);
+  let tg=((c&&c.trigram)||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+  if(!tg) tg=(((c&&c.company)||"CLI").toUpperCase().replace(/[^A-Z0-9]/g,"")).slice(0,3);
+  return (tg||"CLI").slice(0,4);
+}
+// Aperçu du prochain n° (sans consommer le compteur).
+function invoiceNoPreview(clientId){
+  const y=todayISO().slice(0,4);
+  const seq=(((DB.meta.invoiceSeq||{})[y])||0)+1;
+  return "FAC-"+y+"-"+clientTrigram(clientId)+"-"+String(seq).padStart(3,"0");
+}
+// Attribue un n° séquentiel par année (sans trou). Idempotent : ne réattribue jamais si déjà présent.
+function assignInvoiceNo(t){
+  if(t.invoiceNo) return t.invoiceNo;
+  const y=todayISO().slice(0,4);
+  if(!DB.meta.invoiceSeq) DB.meta.invoiceSeq={};
+  const seq=(DB.meta.invoiceSeq[y]||0)+1;
+  DB.meta.invoiceSeq[y]=seq;
+  t.invoiceNo="FAC-"+y+"-"+clientTrigram(t.clientId)+"-"+String(seq).padStart(3,"0");
+  t.invoiceDate=t.invoiceDate||todayISO();
+  return t.invoiceNo;
+}
+// Champs de facture lus depuis le formulaire (ou depuis la transaction si le formulaire est absent).
+function invoiceData(t){
+  const relance=window.__invMode==="relance";
+  if(!document.getElementById("inv-amount")) return { date:t.invoiceDate||todayISO(), label:t.label, amount:t.amount, due:t.dueDate||t.date, notes:"", msg:"", to:((DB.clients.find(x=>x.id===t.clientId)||{}).contactEmail||""), relance };
+  return { date:val("inv-date")||todayISO(), label:(val("inv-label")||t.label||"").trim(), amount:Math.round(parseFloat(val("inv-amount"))||0),
+    due:val("inv-due")||t.dueDate||t.date, notes:(val("inv-notes")||"").trim(), msg:(val("inv-msg")||"").trim(), to:(val("inv-to")||"").trim(), relance };
+}
+function openInvoiceSend(txId, mode){
   const t=DB.transactions.find(x=>x.id===txId); if(!t) return;
+  window.__invTx=t.id; window.__invMode=mode||"";
+  const relance=mode==="relance";
   const c=DB.clients.find(x=>x.id===t.clientId)||{};
   const to=(c.contactEmail||"").trim();
+  const no=t.invoiceNo||invoiceNoPreview(t.clientId);
   openModal(`<span class="close" onclick="closeModal()">✕</span>
-    <h2>✉ Facture — ${esc(t.label)}</h2>
-    <div class="msub">Contrôlez les informations avant l'envoi réel au client.</div>
-    <div class="mini-list" style="margin:8px 0 12px">
-      <div class="li"><span>Client</span><b>${esc(clientName(t.clientId))}</b></div>
+    <h2>${relance?"🔔 Relance — Facture":"✉ Facture"} ${esc(no)}</h2>
+    <div class="msub">${relance?"Relance de paiement — tout reste modifiable avant envoi.":"Tout est modifiable avant envoi — corrigez ici pour éviter toute erreur. Les corrections (objet, montant, échéance) mettent à jour l'échéance dans le Cockpit, pour que facture et pilotage disent toujours la même chose."}</div>
+    <div class="mini-list" style="margin:8px 0 10px">
+      <div class="li"><span>N° facture</span><b>${esc(no)} <span style="color:var(--muted);font-size:11px">${t.invoiceNo?"":"(attribué à l'envoi, séquentiel)"}</span></b></div>
+      <div class="li"><span>Client</span><b>${esc(clientName(t.clientId))} · ${esc(clientTrigram(t.clientId))}</b></div>
       ${t.missionId?`<div class="li"><span>Mission</span><b>${esc(missionRef(t.missionId))}</b></div>`:""}
-      <div class="li"><span>Échéance</span><b>${frDate(t.dueDate||t.date)}</b></div>
-      <div class="li"><span>Montant</span><b>${fmt(t.amount,t.currency)}</b></div>
     </div>
-    <div class="field"><label>Adresse d'envoi (modifiable)</label><input id="inv-to" value="${esc(to)}" placeholder="client@exemple.com"></div>
-    <div class="field"><label>Message d'accompagnement (option)</label><textarea id="inv-msg" rows="2" placeholder="Mot au client…" style="width:100%;font-family:inherit;padding:8px;border:1px solid var(--line);border-radius:8px"></textarea></div>
-    <div class="hint">La date d'envoi sera conservée (accusé). L'échéance reste « à encaisser » — marquez-la encaissée à réception du règlement.</div>
-    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="sendInvoiceEmail('${t.id}')">Envoyer la facture</button></div>`);
+    <div class="field"><label>Destinataire (e-mail client)</label><input id="inv-to" value="${esc(to)}" placeholder="client@exemple.com" oninput="invoicePreview()"></div>
+    <div class="field row2"><label>Date de facture & échéance</label>
+      <input type="date" id="inv-date" value="${t.invoiceDate||todayISO()}" oninput="invoicePreview()"><input type="date" id="inv-due" value="${t.dueDate||t.date||todayISO()}" oninput="invoicePreview()"></div>
+    <div class="field"><label>Objet / libellé</label><input id="inv-label" value="${esc(t.label||'')}" oninput="invoicePreview()"></div>
+    <div class="field row2"><label>Montant &amp; devise</label>
+      <input type="number" id="inv-amount" value="${t.amount!=null?t.amount:''}" oninput="invoicePreview()"><input value="${esc(t.currency||DB.meta.defaultCurrency)}" disabled style="opacity:.7"></div>
+    <div class="field"><label>Notes / détails (apparaissent sur la facture)</label><textarea id="inv-notes" rows="2" placeholder="Période couverte, prestations, conditions de règlement…" style="width:100%;font-family:inherit;padding:8px;border:1px solid var(--line);border-radius:8px" oninput="invoicePreview()"></textarea></div>
+    <div class="field"><label>Message d'accompagnement (corps de l'e-mail${relance?"":", option"})</label><textarea id="inv-msg" rows="${relance?3:2}" placeholder="Mot au client…" style="width:100%;font-family:inherit;padding:8px;border:1px solid var(--line);border-radius:8px" oninput="invoicePreview()">${relance?esc(reminderMessage(t)):""}</textarea></div>
+    <div class="field"><label>Aperçu de la facture (= PDF joint à l'e-mail)</label>
+      <div id="inv-preview" style="border:1px solid var(--line);border-radius:8px;padding:10px;max-height:280px;overflow:auto;background:#fff"></div></div>
+    <div class="hint">La date d'envoi est conservée (accusé). L'échéance reste « à encaisser » — marquez-la encaissée à réception du règlement.${c.contactEmail?"":' <span style="color:var(--orange)">⚠ Aucune adresse sur la fiche client — saisissez-la ci-dessus.</span>'}</div>
+    <div class="modal-actions"><button class="cta ghost" onclick="downloadInvoicePDF('${t.id}')">⬇ PDF</button><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="sendInvoiceEmail('${t.id}','${mode||''}')">${relance?"Envoyer la relance":"Envoyer la facture"}</button></div>`);
+  invoicePreview();
 }
-async function sendInvoiceEmail(txId){
+function invoicePreview(){
+  const el=document.getElementById("inv-preview"); if(!el) return;
+  const t=DB.transactions.find(x=>x.id===window.__invTx); if(!t) return;
+  el.innerHTML=invoiceHtml(t, invoiceData(t));
+}
+function downloadInvoicePDF(txId){
   const t=DB.transactions.find(x=>x.id===txId); if(!t) return;
-  const to=(val("inv-to")||"").trim();
-  if(!to){ toast("Renseignez l'adresse e-mail du client."); return; }
-  const html=invoiceHtml(t,(val("inv-msg")||"").trim());
+  openPrintable(invoiceHtml(t, invoiceData(t)));
+}
+async function sendInvoiceEmail(txId, mode){
+  const t=DB.transactions.find(x=>x.id===txId); if(!t) return;
+  const relance=mode==="relance";
+  const d=invoiceData(t);
+  if(!d.to){ toast("Renseignez l'adresse e-mail du client."); return; }
+  if(!(d.amount>0)){ toast("Montant de la facture invalide."); return; }
+  // Corrections répercutées sur l'échéance → Cockpit et facture restent alignés
+  t.label=d.label||t.label; t.amount=d.amount; t.dueDate=d.due;
+  if(d.date) t.invoiceDate=d.date;
+  assignInvoiceNo(t); // séquentiel, sans trou (idempotent si déjà attribué)
+  const html=invoiceHtml(t, d);
+  const subject=(relance?"[BSM] Relance — Facture ":"[BSM] Facture ")+t.invoiceNo+" — "+t.label;
   try{
-    await googleCall("mail",{to,subject:"[BSM] Facture — "+t.label+" — échéance "+frDate(t.dueDate||t.date),html});
-    t.emailedAt=todayISO(); t.emailedTo=to; save(); closeModal(); refreshAll();
-    toast("Facture envoyée à "+to+" ✅");
+    await googleCall("mail",{ to:d.to, subject, html, pdfHtml:html, pdfName:t.invoiceNo+(relance?"-relance":"") });
+    if(relance){ (t.reminders=t.reminders||[]).push(todayISO()); t.emailedTo=d.to; }
+    else { t.emailedAt=todayISO(); t.emailedTo=d.to; }
+    save(); closeModal(); refreshAll();
+    toast((relance?"Relance envoyée à ":"Facture "+t.invoiceNo+" envoyée à ")+d.to+" ✅");
   }catch(e){ toast("Échec de l'envoi : "+e.message); }
 }
-function invoiceHtml(t,msg){
+function invoiceHtml(t,d){
   const c=DB.clients.find(x=>x.id===t.clientId)||{};
   const cab=DB.meta.cabinetName||"BSM Advisory & Consulting";
+  d=d||invoiceData(t);
+  const no=t.invoiceNo||invoiceNoPreview(t.clientId);
+  const idy=DB.meta.identity||{};
+  const amount=(d.amount!=null?d.amount:t.amount);
   return `<div style="font-family:Arial,sans-serif;color:#1A1A1A;max-width:640px">
-    <div style="border-bottom:3px solid #B5923A;padding-bottom:8px;margin-bottom:14px"><span style="color:#0D1F45;font-weight:700;font-size:18px">${esc(cab)}</span></div>
-    <p>Bonjour${c.contactName?" "+esc(c.contactName):""},</p>
-    ${msg?`<p>${esc(msg)}</p>`:""}
-    <p>Veuillez trouver ci-dessous l'échéance de facturation :</p>
-    <table style="border-collapse:collapse;width:100%;font-size:14px">
-      <tr><td style="padding:6px 8px;color:#6B7280">Objet</td><td style="padding:6px 8px;font-weight:600">${esc(t.label)}</td></tr>
-      ${t.missionId?`<tr><td style="padding:6px 8px;color:#6B7280">Mission</td><td style="padding:6px 8px">${esc(missionRef(t.missionId))}</td></tr>`:""}
-      <tr><td style="padding:6px 8px;color:#6B7280">Échéance</td><td style="padding:6px 8px">${frDate(t.dueDate||t.date)}</td></tr>
-      <tr><td style="padding:6px 8px;color:#6B7280">Montant</td><td style="padding:6px 8px;font-weight:700;font-size:16px">${fmt(t.amount,t.currency)}</td></tr>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #B5923A;padding-bottom:8px;margin-bottom:14px">
+      <div><span style="color:#0D1F45;font-weight:700;font-size:18px">${esc(cab)}</span>${idy.rs?`<div style="color:#6B7280;font-size:11px">${esc(idy.rs)}</div>`:""}${idy.adr?`<div style="color:#6B7280;font-size:11px">${esc(idy.adr)}</div>`:""}</div>
+      <div style="text-align:right"><div style="font-weight:700;color:#0D1F45;letter-spacing:.04em">FACTURE</div><div style="font-size:13px">${esc(no)}</div><div style="color:#6B7280;font-size:11px">${frDate(d.date||todayISO())}</div>${d.relance?`<div style="margin-top:3px;display:inline-block;background:#C0392B;color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:3px">RAPPEL DE PAIEMENT</div>`:""}</div>
+    </div>
+    <p style="margin:2px 0"><b>Client :</b> ${esc(c.company||clientName(t.clientId))}${c.contactName?" — "+esc(c.contactName):""}</p>
+    ${d.msg?`<p>${esc(d.msg)}</p>`:""}
+    <table style="border-collapse:collapse;width:100%;font-size:14px;margin-top:10px">
+      <tr style="background:#0D1F45;color:#fff"><td style="padding:7px 8px">Désignation</td><td style="padding:7px 8px;text-align:right">Montant</td></tr>
+      <tr><td style="padding:8px;vertical-align:top">${esc(d.label||t.label)}${t.missionId?`<br><span style="color:#6B7280;font-size:11px">Mission ${esc(missionRef(t.missionId))}</span>`:""}${d.notes?`<br><span style="color:#6B7280;font-size:12px">${esc(d.notes).replace(/\n/g,"<br>")}</span>`:""}<br><span style="color:#6B7280;font-size:11px">Échéance : ${frDate(d.due||t.dueDate||t.date)}</span></td>
+          <td style="padding:8px;text-align:right;font-weight:700;font-size:15px;vertical-align:top">${fmt(amount,t.currency)}</td></tr>
+      <tr><td style="padding:8px;text-align:right;font-weight:700;border-top:2px solid #0D1F45">Total à régler</td><td style="padding:8px;text-align:right;font-weight:800;font-size:16px;border-top:2px solid #0D1F45">${fmt(amount,t.currency)}</td></tr>
     </table>
     <p style="margin-top:14px">Nous vous remercions de votre confiance.</p>
-    <p style="color:#6B7280;font-size:12px">${esc(cab)} · document généré par le Cockpit BSM le ${frDate(todayISO())}.</p>
+    <p style="color:#6B7280;font-size:12px">${esc(cab)}${idy.email?" · "+esc(idy.email):""}${idy.tel?" · "+esc(idy.tel):""} · Facture émise le ${frDate(d.date||todayISO())} via le Cockpit BSM.</p>
   </div>`;
 }
 function missionSetBilling(mode){
