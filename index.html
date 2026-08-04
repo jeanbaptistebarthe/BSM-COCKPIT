@@ -298,6 +298,7 @@
     <div class="navgroup">CABINET</div>
     <div class="navitem" data-scr="rh" onclick="setScreen('rh')"><span class="ic">🧑‍💼</span><span class="lbl">RH & équipe</span></div>
     <div class="navitem" data-scr="fiches" onclick="setScreen('fiches')"><span class="ic">🆘</span><span class="lbl">Fiches réflexes</span></div>
+    <div class="navitem" data-scr="glossaire" onclick="setScreen('glossaire')"><span class="ic">📖</span><span class="lbl">Glossaire R5</span></div>
     <div class="navgroup admin-only" style="display:none">ADMINISTRATION</div>
     <div class="navitem admin-only" data-scr="admin-users" onclick="setScreen('admin-users')" style="display:none"><span class="ic">🔐</span><span class="lbl">Utilisateurs & accès</span></div>
     <div class="navitem admin-only" data-scr="admin-log" onclick="setScreen('admin-log')" style="display:none"><span class="ic">📋</span><span class="lbl">Connexions & activité</span></div>
@@ -325,6 +326,7 @@
     <div class="screen" id="scr-commercial"></div>
     <div class="screen" id="scr-documentation"></div>
     <div class="screen" id="scr-fiches"></div>
+    <div class="screen" id="scr-glossaire"></div>
     <div class="screen" id="scr-clientfiche"></div>
     <div class="screen" id="scr-analyses"></div>
     <div class="screen" id="scr-admin-users"></div>
@@ -1091,7 +1093,7 @@ function renderScreen(name){
   ({dashboard:renderDashboard, clients:renderClients, agenda:renderAgenda,
     budget:renderBudget, ca:renderCA, resultat:renderResultat, roi:renderROI, aireport:renderAireport, aiassist:renderAiassist, reports:renderReports, monitoring:renderMonitoring, missions:renderMissions, risks:renderRisks,
     carto:renderCarto, recos:renderRecos, rh:renderRH, audit:renderAudit, "a1fleet":renderA1Fleet,
-    commercial:renderCommercial, documentation:renderDocumentation, fiches:renderFiches, clientfiche:renderClientFiche, analyses:renderAnalyses,
+    commercial:renderCommercial, documentation:renderDocumentation, fiches:renderFiches, glossaire:renderGlossaire, clientfiche:renderClientFiche, analyses:renderAnalyses,
     "admin-users":renderAdminUsers, "admin-log":renderAdminLog}[name]||(()=>{}))();
 }
 function refreshAll(){
@@ -1572,13 +1574,45 @@ function clientScores(id){
   // Maturité = familles couvertes (0.4) + risques mis sous contrôle & validés client (0.3) + recos adoptées par le client (0.3).
   const t1=Math.min(1,fam/7), t2=totalR?controlled/totalR:0, t3=recos.length?recoAccepted/recos.length:0;
   const maturite=Math.round(100*(0.4*t1+0.3*t2+0.3*t3));
-  return {maturite,resilience,gouvernance,risque,hasData:totalR>0||recos.length>0};
+  // Ajustement manuel : la direction peut fixer un score (reflète PCA, RTO, feuilles de route, gestion de crise proposées).
+  // Auto = base ; si un score est saisi manuellement, il prime. Vide = auto.
+  const auto={maturite,resilience,gouvernance,risque};
+  const ov=((DB.clients.find(x=>x.id===id)||{}).scoresOverride)||{};
+  const has=function(k){ return ov[k]!=null && ov[k]!==""; };
+  const eff=function(k){ return has(k)? Math.max(0,Math.min(100,Math.round(ov[k]))) : auto[k]; };
+  return { maturite:eff("maturite"), resilience:eff("resilience"), gouvernance:eff("gouvernance"), risque:eff("risque"),
+    auto:auto, overridden:{maturite:has("maturite"),resilience:has("resilience"),gouvernance:has("gouvernance"),risque:has("risque")},
+    anyOverride: has("maturite")||has("resilience")||has("gouvernance")||has("risque"),
+    hasData: totalR>0 || recos.length>0 || has("maturite")||has("resilience")||has("gouvernance")||has("risque") };
 }
 function scoreColor(v){ return v>=75?'#2F855A':v>=50?'#C7A25A':'#C0392B'; }
 function scoreGauge(v,label){
   const C=2*Math.PI*42, off=C*(1-v/100);
   return `<div class="gauge"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42" fill="none" stroke="#EEE8DC" stroke-width="9"/><circle cx="50" cy="50" r="42" fill="none" stroke="${scoreColor(v)}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" transform="rotate(-90 50 50)"/><text x="50" y="58" text-anchor="middle" font-size="26" font-weight="700" fill="currentColor">${v}</text></svg><div class="gauge-l">${label}</div></div>`;
 }
+// Ajustement manuel des scores R5 d'un client (auto = base, saisie = override par dimension).
+function openScoresForm(id){
+  if(!canFinance()){ toast("Réservé à la direction."); return; }
+  const c=DB.clients.find(x=>x.id===id); if(!c) return;
+  const sc=clientScores(id), ov=c.scoresOverride||{};
+  const row=(key,label)=>`<div class="field" style="margin:0"><label>${label} <span style="font-weight:400;color:var(--muted)">— auto : ${sc.auto[key]}</span></label>
+    <input type="number" id="sco-${key}" min="0" max="100" value="${(ov[key]!=null&&ov[key]!=="")?ov[key]:""}" placeholder="auto (${sc.auto[key]})"></div>`;
+  openModal(`<span class="close" onclick="closeModal()">✕</span>
+    <h2>✎ Ajuster les scores R5® — ${esc(c.company)}</h2>
+    <div class="msub">Champ vide = calcul automatique. Saisis une valeur (0–100) pour refléter les mesures que tu proposes (PCA, PRA, RTO, feuilles de route, gestion de crise). Ces scores alimentent le <b>rapport</b> et le <b>portail client</b>.</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      ${row("maturite","Maturité")}${row("resilience","Résilience")}${row("gouvernance","Gouvernance")}${row("risque","Maîtrise du risque")}</div>
+    <div class="hint" style="margin-top:8px">💡 Chaque champ laissé vide reprend automatiquement le calcul basé sur les risques & recommandations.</div>
+    <div class="modal-actions"><button class="cta ghost" onclick="resetScores('${id}')">↺ Tout en auto</button><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="saveScores('${id}')">Enregistrer</button></div>`);
+}
+function saveScores(id){
+  const c=DB.clients.find(x=>x.id===id); if(!c) return;
+  const ov={};
+  ["maturite","resilience","gouvernance","risque"].forEach(k=>{ const v=val("sco-"+k); if(v!==""&&v!=null&&!isNaN(parseFloat(v))) ov[k]=Math.max(0,Math.min(100,Math.round(parseFloat(v)))); });
+  c.scoresOverride=Object.keys(ov).length?ov:undefined;
+  save(); closeModal(); if(typeof renderClientFiche==="function") renderClientFiche(); refreshAll(); toast("Scores R5 mis à jour.");
+}
+function resetScores(id){ const c=DB.clients.find(x=>x.id===id); if(!c) return; c.scoresOverride=undefined; save(); openScoresForm(id); toast("Scores remis en automatique."); }
 /* ---- Portail client (lecture seule) : page à la charte BSM montrant au client ses risques, recos & statuts ---- */
 function clientPortalBody(id){
   const c=DB.clients.find(x=>x.id===id)||{};
@@ -1682,8 +1716,9 @@ function renderClientFiche(){
     ${clientProgressCard(c.id)}
     ${clientDocCard(c.id)}
     <div class="card">
-      <h2>Scores R5®</h2>
-      ${sc.hasData?`<div class="gauges">${scoreGauge(sc.maturite,'Maturité')}${scoreGauge(sc.resilience,'Résilience')}${scoreGauge(sc.gouvernance,'Gouvernance')}${scoreGauge(sc.risque,'Maîtrise du risque')}</div>`:`<div class="empty">Aucune donnée de risque pour calculer les scores. Ajoute des risques ou importe un audit.</div>`}
+      <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">Scores R5®${sc.anyOverride?` <span class="badge" style="background:var(--gold);color:#fff" title="Un ou plusieurs scores ont été ajustés manuellement">✎ ajusté</span>`:""}</h2>${canFinance()?`<button class="cta ghost sm" onclick="openScoresForm('${c.id}')">✎ Ajuster les scores</button>`:""}</div>
+      ${sc.hasData?`<div class="gauges">${scoreGauge(sc.maturite,'Maturité'+(sc.overridden.maturite?' ✎':''))}${scoreGauge(sc.resilience,'Résilience'+(sc.overridden.resilience?' ✎':''))}${scoreGauge(sc.gouvernance,'Gouvernance'+(sc.overridden.gouvernance?' ✎':''))}${scoreGauge(sc.risque,'Maîtrise'+(sc.overridden.risque?' ✎':''))}</div>
+      <div class="hint" style="margin-top:6px">Score calculé automatiquement à partir des risques & recommandations. La direction peut l'<b>ajuster</b> pour refléter les mesures proposées (PCA, PRA, RTO, feuilles de route…). Les scores affichés ici alimentent le rapport et le portail client.</div>`:`<div class="empty">Aucune donnée de risque pour calculer les scores. Ajoute des risques, importe un audit, ou <a href="#" onclick="openScoresForm('${c.id}');return false;">ajuste-les manuellement</a>.</div>`}
     </div>
     <div class="kpis">
       <div class="kpi"><div class="v">${miss.length}</div><div class="l">Missions</div></div>
@@ -2577,6 +2612,59 @@ function defaultPlaybooks(){ return [
   {id:uid(),icon:"📦",title:"Rupture fournisseur critique",steps:["Activer le fournisseur de secours identifié dans le PCA","Évaluer l'impact sur les délais clients","Communiquer de façon proactive aux clients impactés","Alerter BSM pour réévaluer le plan de continuité","Négocier un plan de sortie de crise avec le fournisseur"]},
   {id:uid(),icon:"📢",title:"Crise réputationnelle",steps:["Ne jamais répondre à chaud sur les réseaux sociaux","Centraliser la communication auprès d'un seul porte-parole","Alerter BSM pour activer la stratégie de communication de crise","Préparer un communiqué de position sous 4h","Monitorer les mentions et le sentiment en continu"]}
 ]; }
+/* ---- Glossaire R5 (annexe) : définitions des sigles de la gestion des risques & de la continuité ---- */
+const GLOSSARY=[
+  {cat:"Méthode R5® (BSM)", terms:[
+    {sigle:"R5®", nom:"Méthode BSM en 5 temps", def:"Reveal · Connect · Respond · Strengthen · Review : identifier, comprendre les interactions, répondre, renforcer durablement, puis mesurer et améliorer en continu."},
+    {sigle:"R1 — Reveal", nom:"Révéler", def:"Identifier les risques, vulnérabilités et opportunités de l'organisation."},
+    {sigle:"R2 — Connect", nom:"Relier", def:"Comprendre les interactions entre risques, processus, ressources et gouvernance."},
+    {sigle:"R3 — Respond", nom:"Répondre", def:"Recommandations réalistes, pragmatiques et priorisées (BSM propose, le client décide)."},
+    {sigle:"R4 — Strengthen", nom:"Renforcer", def:"Mettre en place et pérenniser les dispositifs (protocoles, PCA/PRA, formation)."},
+    {sigle:"R5 — Review", nom:"Réviser", def:"Mesurer, suivre les indicateurs et améliorer en continu ; les risques étant mobiles, ils sont revus périodiquement."}
+  ]},
+  {cat:"Continuité & reprise d'activité", terms:[
+    {sigle:"PCA", nom:"Plan de Continuité d'Activité (BCP)", def:"Ensemble de mesures qui permettent à l'organisation de poursuivre ses activités essentielles pendant et après un sinistre."},
+    {sigle:"PRA", nom:"Plan de Reprise d'Activité (DRP)", def:"Procédures pour restaurer les systèmes et l'activité après une interruption (surtout informatique)."},
+    {sigle:"PGC", nom:"Plan de Gestion de Crise", def:"Organisation et procédures de la cellule de crise : rôles, communication, décisions, escalade."},
+    {sigle:"MCO", nom:"Maintien en Condition Opérationnelle", def:"Ensemble des actions garantissant qu'un système/équipement reste disponible et performant dans le temps."},
+    {sigle:"MCS", nom:"Maintien en Condition de Sécurité", def:"Actions garantissant qu'un système reste sûr (mises à jour, correctifs, contrôles) face aux menaces."}
+  ]},
+  {cat:"Objectifs temporels (continuité)", terms:[
+    {sigle:"RTO", nom:"Recovery Time Objective", def:"Durée maximale d'interruption acceptable d'un processus avant que l'impact ne devienne critique — le délai cible de reprise."},
+    {sigle:"RPO", nom:"Recovery Point Objective (PDMA)", def:"Perte de données maximale admissible, exprimée en temps (ex. 1h) : à quel point de sauvegarde on peut revenir."},
+    {sigle:"MTPD / DMIA", nom:"Durée Maximale d'Interruption Admissible", def:"Durée au-delà de laquelle l'interruption d'une activité menace la survie de l'organisation. Le RTO doit lui être inférieur."},
+    {sigle:"WRT", nom:"Work Recovery Time", def:"Temps nécessaire, après restauration technique, pour vérifier les données et reprendre le travail normal."}
+  ]},
+  {cat:"Analyse & évaluation du risque", terms:[
+    {sigle:"BIA", nom:"Bilan d'Impact sur l'Activité (Business Impact Analysis)", def:"Analyse qui identifie les activités critiques et les conséquences (financières, opérationnelles, réputationnelles) d'une interruption ; fonde les RTO/RPO."},
+    {sigle:"P × I", nom:"Cotation Probabilité × Impact", def:"Score de criticité d'un risque (échelle 1–5 chacun) ; ≥ 15 = risque critique dans la matrice R5."},
+    {sigle:"Risque inhérent", nom:"", def:"Niveau de risque brut, avant toute mesure de maîtrise."},
+    {sigle:"Risque résiduel", nom:"", def:"Niveau de risque qui subsiste après application des mesures de traitement."},
+    {sigle:"Appétence au risque", nom:"Risk appetite", def:"Niveau de risque que l'organisation accepte de prendre pour atteindre ses objectifs."},
+    {sigle:"Sous contrôle", nom:"", def:"Risque maîtrisé par un protocole validé — il reste présent sur la matrice, il n'est pas supprimé."}
+  ]},
+  {cat:"Normes & référentiels", terms:[
+    {sigle:"ISO 31000", nom:"Management du risque", def:"Norme internationale donnant les principes et lignes directrices de la gestion des risques."},
+    {sigle:"ISO 22301", nom:"Systèmes de management de la continuité d'activité", def:"Norme de référence pour concevoir, exploiter et améliorer un PCA."},
+    {sigle:"ISO 27001", nom:"Sécurité de l'information", def:"Norme de management de la sécurité de l'information (confidentialité, intégrité, disponibilité)."}
+  ]}
+];
+function renderGlossaire(){
+  const host=document.getElementById("scr-glossaire"); if(!host) return;
+  const q=(window.glossQ||"").toLowerCase();
+  const cats=GLOSSARY.map(function(g){
+    const terms=g.terms.filter(function(t){ return !q || (t.sigle+" "+(t.nom||"")+" "+t.def).toLowerCase().indexOf(q)>=0; });
+    if(!terms.length) return "";
+    return '<div class="card"><h2>'+esc(g.cat)+'</h2>'+terms.map(function(t){
+      return '<div style="padding:8px 0;border-bottom:1px solid var(--line)"><b style="color:var(--navy)">'+esc(t.sigle)+'</b>'+(t.nom?' — <span style="color:var(--navy);font-weight:600">'+esc(t.nom)+'</span>':"")+'<div style="font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.5">'+esc(t.def)+'</div></div>';
+    }).join("")+'</div>';
+  }).join("");
+  host.innerHTML=''
+    +'<div class="pagetitle"><div><h1>Glossaire R5® — annexe</h1><div class="sub">Définitions des sigles de la gestion des risques, de la continuité et de la résilience</div></div></div>'
+    +'<div class="filters"><input placeholder="Rechercher un terme (RTO, PCA, BIA…)" value="'+esc(window.glossQ||"")+'" oninput="window.glossQ=this.value;renderGlossaire()" style="flex:1;min-width:220px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit"></div>'
+    +(cats||'<div class="card"><div class="empty">Aucun terme ne correspond.</div></div>')
+    +'<div class="hint">Ces définitions peuvent aussi accompagner vos rapports pour aider vos clients à comprendre les recommandations.</div>';
+}
 function renderFiches(){
   const dus=DB.clients.filter(c=>c.fichesDues);
   document.getElementById("scr-fiches").innerHTML=`
@@ -6278,17 +6366,18 @@ const PERMSCREENS=[
   {key:"audit",    label:"Audit terrain",grp:"CABINET"},
   {key:"documentation",label:"Documentation",grp:"CABINET"},
   {key:"fiches",   label:"Fiches réflexes",grp:"CABINET"},
+  {key:"glossaire",label:"Glossaire R5",grp:"CABINET"},
   {key:"analyses", label:"Analyses & Conseils",grp:"MÉTHODE R5",fin:true}
 ];
 function permAll(){ return PERMSCREENS.map(p=>p.key); }
 /* Modèles de rôle = accès par défaut (élargissables ensuite, par utilisateur). clientFinance = voir CA/contrats/devis dans la fiche client. */
 const ROLE_TEMPLATES={
   admin:       { label:"Administrateur", allowed:"*", clientFinance:true },
-  direction:   { label:"Direction",      allowed:["dashboard","clients","agenda","budget","ca","resultat","roi","aireport","aiassist","reports","monitoring","missions","risks","carto","recos","commercial","rh","audit","documentation","fiches","analyses"], clientFinance:true },
-  analyste:    { label:"Analyste R5",     allowed:["clients","monitoring","missions","risks","carto","recos","audit","documentation","fiches"], clientFinance:false },
-  commercial:  { label:"Commercial",      allowed:["clients","agenda","monitoring","commercial","documentation","fiches"], clientFinance:true },
-  rh:          { label:"RH",              allowed:["rh","agenda","monitoring","documentation","fiches"], clientFinance:false },
-  collaborateur:{ label:"Collaborateur",  allowed:["clients","agenda","monitoring","missions","risks","carto","recos","audit","documentation","fiches"], clientFinance:false }
+  direction:   { label:"Direction",      allowed:["dashboard","clients","agenda","budget","ca","resultat","roi","aireport","aiassist","reports","monitoring","missions","risks","carto","recos","commercial","rh","audit","documentation","fiches","glossaire","analyses"], clientFinance:true },
+  analyste:    { label:"Analyste R5",     allowed:["clients","monitoring","missions","risks","carto","recos","audit","documentation","fiches","glossaire"], clientFinance:false },
+  commercial:  { label:"Commercial",      allowed:["clients","agenda","monitoring","commercial","documentation","fiches","glossaire"], clientFinance:true },
+  rh:          { label:"RH",              allowed:["rh","agenda","monitoring","documentation","fiches","glossaire"], clientFinance:false },
+  collaborateur:{ label:"Collaborateur",  allowed:["clients","agenda","monitoring","missions","risks","carto","recos","audit","documentation","fiches","glossaire"], clientFinance:false }
 };
 function ensureUserPerms(u){
   if(!u) return u;
