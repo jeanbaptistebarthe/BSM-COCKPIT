@@ -502,6 +502,12 @@ function load(){
 function ymKey(dstr){ const p=(dstr||"").split("-"); const y=parseInt(p[0]); const m=parseInt(p[1]); return y? y*12+((m||1)-1) : 0; }
 function freqMonths(f){ return f==="annuel"?12:(f==="trimestriel"?3:1); }
 function freqLabel(f){ return f==="annuel"?"Annuel":(f==="trimestriel"?"Trimestriel":"Mensuel"); }
+function freqUnit(f){ return f==="annuel"?"an":(f==="trimestriel"?"trimestre":"mois"); }
+// Mode de facturation d'une mission — rétro-compatible avec l'ancien booléen m.forfait.
+function missionBilling(m){ return (m&&m.billing) || (m&&m.forfait?"forfait":"ponctuel"); }
+// Le récurrent (abonnement/honoraires) lié à une mission, s'il existe.
+function missionRecurring(mid){ return (DB.recurring||[]).find(r=>r.missionId===mid); }
+function missionRef(mid){ const m=DB.missions.find(x=>x.id===mid); return m?((m.ref?m.ref+" — ":"")+(m.type||"Mission")):""; }
 function generateRecurring(){
   if(!DB.recurring||!DB.recurring.length) return 0;
   const now=new Date(), curKey=now.getFullYear()*12+now.getMonth();
@@ -523,11 +529,16 @@ function generateRecurring(){
       const day=Math.min(rc.day||1, new Date(y,mo+1,0).getDate());
       const dstr=y+"-"+String(mo+1).padStart(2,"0")+"-"+String(day).padStart(2,"0");
       const isPast = dstr<=todayISO();
+      const isIncome = rc.sens==="entrant";
+      // Justesse comptable : un PRODUIT (abonnement/honoraires) échu reste « à encaisser » tant que le
+      // règlement n'est pas confirmé — le CA effectif ne gonfle jamais tout seul avec le temps.
+      // Une CHARGE/un salaire échu(e) est présumé(e) payé(e), comme avant.
+      const st = isIncome ? "prevu" : (isPast?"realise":"prevu");
       DB.transactions.push({ id:uid(), sens:rc.sens||"sortant", label:rc.label, amount:rc.amount,
-        currency:rc.currency||DB.meta.defaultCurrency, method: isPast?(rc.method||""):"", category:rc.category,
-        clientId:rc.clientId||"", employeeId:rc.employeeId||"", recurringId:rc.id, entity:rc.entity||"bsmac",
-        nature:rc.sens==="entrant"?"client":"prestataire", period, date:dstr, dueDate:dstr,
-        status: isPast?"realise":"prevu" });
+        currency:rc.currency||DB.meta.defaultCurrency, method: (!isIncome&&isPast)?(rc.method||""):"", category:rc.category,
+        clientId:rc.clientId||"", employeeId:rc.employeeId||"", missionId:rc.missionId||"", recurringId:rc.id,
+        invoice: !!rc.invoice, entity:rc.entity||"bsmac",
+        nature:rc.sens==="entrant"?"client":"prestataire", period, date:dstr, dueDate:dstr, status: st });
       created++;
     }
   });
@@ -1649,9 +1660,9 @@ function clientProgress(id){
   if(engaged){
     admin.push({label:"Devis validé", done: !!clientDevis(id) || hasDoc("Devis") || hasSignedDocL("devis")});
     admin.push({label:"Contrat signé", done: !!(c.signatureDate||c.contractType) || hasDoc("Contrat") || active.some(m=>m.contrat) || hasSignedDocL("contrat")});
-    const billMiss=active.filter(m=>!m.forfait && (m.montantHT||0)>0);
+    const billMiss=active.filter(m=>{const bm=missionBilling(m); return bm==="abonnement" || (bm==="ponctuel" && (m.montantHT||0)>0);});
     if(billMiss.length){
-      admin.push({label:"Échéancier de facturation défini", done: billMiss.every(m=>DB.transactions.some(t=>t.missionId===m.id))});
+      admin.push({label:"Facturation définie", done: billMiss.every(m=> missionBilling(m)==="abonnement" ? !!missionRecurring(m.id) : DB.transactions.some(t=>t.missionId===m.id))});
     }
     // NDA : dans le périmètre seulement s'il est signalé (signé, document, ou livrable de mission)
     if(c.ndaSigned || hasDoc("NDA") || active.some(m=>m.nda) || hasSignedDocL("nda")){
@@ -2857,6 +2868,7 @@ function renderBudget(){
       <div style="display:flex;gap:8px">${isDirection()?`<button class="cta ghost" onclick="openRecurringManager()" title="Montants récurrents (mensuel/trimestriel/annuel)">🔁 Récurrents${DB.recurring.filter(r=>r.active!==false).length?` (${DB.recurring.filter(r=>r.active!==false).length})`:""}</button>`:""}<button class="cta ghost" onclick="openTxForm(null,'sortant')">− Dépense</button><button class="cta" onclick="openTxForm(null,'entrant')">+ Entrée</button></div></div>
     ${validationPanelHtml()}
     ${focusBanner()}
+    ${invoicePanelHtml()}
     <div class="kpis">
       <div class="kpi"><div class="v good">${fmtD(encaisse)}</div><div class="l">Entrées encaissées ${y}</div></div>
       <div class="kpi"><div class="v">${fmtD(prevuIn)}</div><div class="l">Entrées prévues (à venir)</div></div>
@@ -2936,7 +2948,12 @@ function openTxForm(id, sens){
       <select id="f-currency">${curOptions(t.currency)}</select></div>
     <div class="field row2"><label>Catégorie & client</label>
       <select id="f-cat">${cats.map(c=>`<option ${t.category===c?'selected':''}>${c}</option>`).join("")}</select>
-      <select id="f-txclient"><option value="">— Aucun —</option>${DB.clients.map(c=>`<option value="${c.id}" ${t.clientId===c.id?'selected':''}>${esc(c.company)}</option>`).join("")}</select></div>
+      <select id="f-txclient" onchange="txClientChange()"><option value="">— Aucun —</option>${DB.clients.map(c=>`<option value="${c.id}" ${t.clientId===c.id?'selected':''}>${esc(c.company)}</option>`).join("")}</select></div>
+    ${dir?`<div class="field row2"><label>Périodicité & mission liée <span style="font-weight:400;color:var(--muted);font-size:11.5px">— 🔁 = abonnement/charge récurrent</span></label>
+      <select id="f-txfreq" onchange="txFreqChange()">${[["ponctuel","Ponctuel (une seule fois)"],["mensuel","🔁 Mensuel"],["trimestriel","🔁 Trimestriel"],["annuel","🔁 Annuel"]].map(f=>`<option value="${f[0]}" ${((t.recurringId?"":"ponctuel"))===f[0]?'selected':''}>${f[1]}</option>`).join("")}</select>
+      <select id="f-txmission">${missionOptions(t.missionId, t.clientId)}</select></div>
+      <div class="field" id="txfreq-invoice" style="display:none"><label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" id="f-txinvoice"> 📄 Facturer chaque échéance et l'envoyer au client par e-mail (après vérification)</label></div>
+      <div class="hint" id="txfreq-hint" style="display:none;color:var(--navy)">🔁 Un abonnement récurrent sera créé : les échéances (${todayISO().slice(0,4)} et à venir) sont générées automatiquement dans le Budget, le CA et la mission. Modifiable ensuite via « 🔁 Récurrents ».</div>`:""}
     <div class="field"><label>Statut</label><select id="f-txstatus" onchange="toggleMethodField()">
       <option value="prevu" ${t.status==='prevu'?'selected':''}>Prévu (prévision)</option>
       <option value="realise" ${t.status==='realise'?'selected':''}>Réalisé (encaissé / payé)</option></select></div>
@@ -2979,9 +2996,17 @@ function switchSens(s){
   document.getElementById("seg-sortant").classList.toggle("active",s==="sortant");
   const sel=document.getElementById("f-cat"); const cats=s==="entrant"?CAT_IN:CAT_OUT;
   sel.innerHTML=cats.map(c=>`<option>${c}</option>`).join("");
+  if(document.getElementById("f-txfreq")) txFreqChange();
 }
 function toggleMethodField(){
   document.getElementById("method-field").style.display = val("f-txstatus")==="realise"?"":"none";
+}
+function txClientChange(){ const el=document.getElementById("f-txmission"); if(el) el.innerHTML=missionOptions(el.value, val("f-txclient")); }
+function txFreqChange(){
+  const freq=val("f-txfreq")||"ponctuel", isRec=freq!=="ponctuel", isIn=val("f-sens")==="entrant";
+  const inv=document.getElementById("txfreq-invoice"), hint=document.getElementById("txfreq-hint");
+  if(inv) inv.style.display = (isRec && isIn)?"":"none";
+  if(hint) hint.style.display = isRec?"":"none";
 }
 function saveTx(id){
   const label=val("f-label").trim();
@@ -2992,7 +3017,7 @@ function saveTx(id){
   const existingTx=id?DB.transactions.find(x=>x.id===id):null;
   const oldTxStatus=existingTx?existingTx.status:null;
   const obj={ sens:val("f-sens"), label, amount:Math.round(amount), currency:val("f-currency"),
-    category:val("f-cat"), clientId:val("f-txclient"), status, date:val("f-txdate"),
+    category:val("f-cat"), clientId:val("f-txclient"), missionId:val("f-txmission")||(existingTx&&existingTx.missionId)||"", status, date:val("f-txdate"),
     dueDate:val("f-txdue"), method: status==="realise"?val("f-txmethod"):"",
     nature:val("f-nature")||"", entity:val("f-entity")||"bsmac" };
   // Sécurité : un collaborateur (hors direction) doit passer par une demande motivée à valider.
@@ -3001,6 +3026,19 @@ function saveTx(id){
     if(!motivation){ toast("Le motif de la demande est obligatoire."); return; }
     submitMoneyRequest(id?"update":"create", id||null, obj, motivation);
     closeModal(); return;
+  }
+  // Périodicité ≠ ponctuel (nouveau mouvement) → on crée un ABONNEMENT/CHARGE récurrent, pas une ligne unique.
+  const txFreq=val("f-txfreq")||"ponctuel";
+  if(!id && txFreq!=="ponctuel"){
+    const d=obj.date||todayISO();
+    const rcObj={ sens:obj.sens, label:obj.label, amount:obj.amount, currency:obj.currency, category:obj.category,
+      frequency:txFreq, day:Math.max(1,Math.min(28,parseInt(d.slice(8,10))||1)),
+      startDate:d, endDate:"", clientId:obj.clientId, missionId:obj.missionId,
+      invoice: obj.sens==="entrant" && !!(document.getElementById("f-txinvoice")&&document.getElementById("f-txinvoice").checked),
+      entity:obj.entity, active:true, id:uid(), created:todayISO() };
+    DB.recurring.push(rcObj); generateRecurring();
+    notify(obj.sens==="entrant"?"encaissement":"depense","Abonnement "+freqLabel(txFreq).toLowerCase()+" créé", obj.label+" · "+fmt(obj.amount,obj.currency)+"/"+freqUnit(txFreq)+(obj.clientId?" · "+clientName(obj.clientId):""), {clientId:obj.clientId});
+    save(); closeModal(); refreshAll(); toast("Abonnement récurrent créé — échéances générées."); return;
   }
   if(id){ Object.assign(existingTx,obj); }
   else { obj.id=uid(); DB.transactions.push(obj); }
@@ -3482,7 +3520,7 @@ function openRecurringManager(){
     <div class="msub">Définis une fois — générés automatiquement (mensuel / trimestriel / annuel) dans le budget et le compte de résultat. Zéro re-saisie.</div>
     <div style="margin:6px 0 12px"><button class="cta" onclick="openRecurringForm()">+ Nouveau récurrent</button></div>
     ${list.length? `<table><thead><tr><th>Libellé</th><th>Type</th><th>Catégorie</th><th>Fréquence</th><th style="text-align:right">Montant</th><th>Jour</th><th>Actif</th><th></th></tr></thead><tbody>`+
-      list.map(r=>`<tr><td><b>${esc(r.label)}</b>${r.endDate?`<br><span style="color:var(--muted);font-size:11px">jusqu'au ${frDate(r.endDate)}</span>`:""}</td><td>${r.sens==="entrant"?"Entrée":"Dépense"}</td><td>${esc(r.category||"—")}</td>
+      list.map(r=>`<tr><td><b>${esc(r.label)}</b>${r.missionId&&missionRef(r.missionId)?`<br><span style="color:var(--muted);font-size:11px">🔗 ${esc(missionRef(r.missionId))}</span>`:""}${r.invoice?` <span title="Facture envoyée au client" style="color:var(--gold)">📄</span>`:""}${r.endDate?`<br><span style="color:var(--muted);font-size:11px">jusqu'au ${frDate(r.endDate)}</span>`:""}</td><td>${r.sens==="entrant"?"Entrée":"Dépense"}</td><td>${esc(r.category||"—")}</td>
         <td>${freqLabel(r.frequency)}</td>
         <td style="text-align:right;color:${r.sens==='entrant'?'var(--green)':'var(--red)'}">${fmt(r.amount,r.currency)}</td>
         <td>${r.day||1}</td><td><label style="font-weight:400"><input type="checkbox" ${r.active!==false?'checked':''} onchange="toggleRecurring('${r.id}',this.checked)"></label></td>
@@ -3514,8 +3552,13 @@ function openRecurringForm(id){
       <input type="date" id="rc-start" value="${r.startDate||todayISO()}"><input type="date" id="rc-end" value="${r.endDate||''}"></div>
     <div class="field row2"><label>Entité & client lié (option)</label>
       <select id="rc-entity">${entityOptions(r.entity)}</select>
-      <select id="rc-client"><option value="">— Aucun client —</option>${DB.clients.map(c=>`<option value="${c.id}" ${r.clientId===c.id?'selected':''}>${esc(c.company)}</option>`).join("")}</select></div>
-    <div class="hint">Les échéances passées sont générées en « payé/encaissé », les échéances à venir de l'exercice en « prévu » (elles comptent dans le compte de résultat prévisionnel). Ex : dépense de 6 000 000 Ar à partir d'août jusqu'à une date de fin → intégrée automatiquement.</div>
+      <select id="rc-client" onchange="rcRenderMissions()"><option value="">— Aucun client —</option>${DB.clients.map(c=>`<option value="${c.id}" ${r.clientId===c.id?'selected':''}>${esc(c.company)}</option>`).join("")}</select></div>
+    <div class="field"><label>Mission liée (option) <span style="font-weight:400;color:var(--muted);font-size:11.5px">— l'abonnement remonte alors dans la mission</span></label>
+      <select id="rc-mission">${missionOptions(r.missionId, r.clientId)}</select></div>
+    <div class="field" id="rc-invoice-field" style="${r.sens==='entrant'?'':'display:none'}">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" id="rc-invoice" ${r.invoice?'checked':''}> 📄 Générer une facture par échéance et l'envoyer au client par e-mail (après vérification)</label>
+      <div class="hint">Chaque échéance apparaît dans « Factures à envoyer » (Budget). Vous contrôlez puis envoyez : vrai e-mail au client via le pont Google.</div></div>
+    <div class="hint">Produits (entrées) : chaque échéance échue reste « à encaisser » jusqu'à confirmation du règlement. Charges (dépenses) échues : générées « payé ». Les échéances à venir de l'exercice comptent dans le prévisionnel. Ex : abonnement de 45 000 000 Ar/an à partir d'août → intégré automatiquement à la mission, au budget et au compte de résultat.</div>
     <div class="modal-actions"><button class="cta ghost" onclick="openRecurringManager()">Annuler</button><button class="cta" onclick="saveRecurring('${id||''}')">Enregistrer</button></div>`);
 }
 function rcSwitch(s){
@@ -3523,14 +3566,27 @@ function rcSwitch(s){
   document.getElementById("rc-seg-in").classList.toggle("active",s==="entrant");
   document.getElementById("rc-seg-out").classList.toggle("active",s!=="entrant");
   const sel=document.getElementById("rc-cat"); sel.innerHTML=(s==="entrant"?CAT_IN:CAT_OUT).map(c=>`<option>${c}</option>`).join("");
+  const inv=document.getElementById("rc-invoice-field"); if(inv) inv.style.display = s==="entrant"?"":"none";
 }
+// Liste d'options de missions, filtrable sur un client (pour lier un récurrent/mouvement à une mission).
+function missionOptions(selId, clientId){
+  let ms=DB.missions.slice();
+  if(clientId) ms=ms.filter(m=>m.clientId===clientId);
+  ms.sort((a,b)=>(a.ref||"").localeCompare(b.ref||""));
+  return `<option value="">— Aucune mission —</option>`+ms.map(m=>`<option value="${m.id}" ${selId===m.id?'selected':''}>${esc((m.ref?m.ref+" — ":"")+(m.type||"Mission")+" · "+clientName(m.clientId))}</option>`).join("");
+}
+// Recharge la liste des missions quand on change le client dans le formulaire récurrent.
+function rcRenderMissions(){ const el=document.getElementById("rc-mission"); if(el) el.innerHTML=missionOptions(el.value, val("rc-client")); }
 function saveRecurring(id){
   const label=val("rc-label").trim(); const amount=parseFloat(val("rc-amount"));
   if(!label){ toast("Le libellé est obligatoire."); return; }
   if(isNaN(amount)||amount<=0){ toast("Montant invalide."); return; }
+  const rcMission=val("rc-mission")||"";
   const obj={ sens:val("rc-sens"), label, amount:Math.round(amount), currency:val("rc-cur"), category:val("rc-cat"),
     frequency:val("rc-freq")||"mensuel", day:Math.max(1,Math.min(28,parseInt(val("rc-day"))||1)),
-    startDate:val("rc-start")||todayISO(), endDate:val("rc-end")||"", clientId:val("rc-client"), entity:val("rc-entity")||"bsmac", active:true };
+    startDate:val("rc-start")||todayISO(), endDate:val("rc-end")||"", clientId:val("rc-client"), missionId:rcMission,
+    invoice: val("rc-sens")==="entrant" && !!(document.getElementById("rc-invoice")&&document.getElementById("rc-invoice").checked),
+    entity:val("rc-entity")||"bsmac", active:true };
   if(id){ Object.assign(DB.recurring.find(x=>x.id===id),obj);
     // purge des échéances à venir (prévu) pour régénérer selon la nouvelle fréquence/montant ; l'historique payé est conservé
     DB.transactions=DB.transactions.filter(t=>!(t.recurringId===id && t.status==="prevu")); }
@@ -3947,11 +4003,17 @@ function renderMissions(){
     <div class="filters">${clientPickerHtml()}</div>
     <div class="card">
       ${list.length? `<table><thead><tr><th>Réf</th><th>Client</th><th>Type</th><th>Phase R5</th><th>Montant HT</th><th>Solde dû</th><th>Livrables</th><th>Statut</th><th></th></tr></thead><tbody>`+
-      list.map(m=>{const enc=missionEncaisse(m.id);const solde=(m.montantHT||0)-enc;const nEch=DB.transactions.filter(t=>t.missionId===m.id).length;const docs=[m.nda?"NDA":"",m.contrat?"Contrat":"",m.rapport?"Rapport":""].filter(Boolean).join(" · ")||"—";
+      list.map(m=>{const bm=missionBilling(m);const rc=missionRecurring(m.id);const enc=missionEncaisse(m.id);const aEnc=DB.transactions.filter(t=>t.missionId===m.id&&t.sens==="entrant");const nAtt=aEnc.filter(t=>t.status==="prevu").length;const attMt=aEnc.filter(t=>t.status==="prevu").reduce((s,t)=>s+(t.amount||0),0);const solde=(m.montantHT||0)-enc;const nEch=aEnc.length;const docs=[m.nda?"NDA":"",m.contrat?"Contrat":"",m.rapport?"Rapport":""].filter(Boolean).join(" · ")||"—";
+        const montantCell = bm==="abonnement"
+          ? `<span class="badge b-blue">🔁 Abonnement ${rc?freqLabel(rc.frequency).toLowerCase():""}</span>${rc?`<div style="font-size:11px;color:var(--navy);font-weight:600;margin-top:2px">${fmt(rc.amount,rc.currency)} / ${freqUnit(rc.frequency)}</div>`:""}<div style="font-size:10.5px;color:var(--muted);margin-top:2px">encaissé ${fmt(enc,m.currency)}${nAtt?` · ${nAtt} à encaisser`:""}</div>`
+          : bm==="forfait"
+          ? `<span class="badge b-grey">Forfait externe</span>`
+          : `${m.montantHT?fmt(m.montantHT,m.currency):"—"}${nEch?`<div style="font-size:10.5px;color:var(--muted);margin-top:2px">${nEch} échéance${nEch>1?"s":""} · encaissé ${fmt(enc,m.currency)}</div>`:""}`;
+        const soldeCell = bm==="abonnement" ? (attMt?`<span style="color:var(--orange);font-weight:600">${fmt(attMt,m.currency)}</span>`:"—") : bm==="forfait" ? "—" : (m.montantHT?`<span style="${solde>0?'color:var(--orange);font-weight:600':'color:var(--green);font-weight:600'}">${fmt(solde,m.currency)}</span>`:"—");
         return `<tr><td><b>${esc(m.ref||"—")}</b></td><td>${clientLink(m.clientId)}</td><td>${esc(m.type||"—")}</td>
         <td>${r5MiniHtml(m.phase)}<div style="font-size:10.5px;color:var(--muted);margin-top:3px">${R5_LABELS[m.phase]||esc(m.phase||"")}</div></td>
-        <td>${m.forfait?`<span class="badge b-blue">Forfait / abonnement</span>`:(m.montantHT?fmt(m.montantHT,m.currency):"—")}${(!m.forfait&&nEch)?`<div style="font-size:10.5px;color:var(--muted);margin-top:2px">${nEch} échéance${nEch>1?"s":""} · encaissé ${fmt(enc,m.currency)}</div>`:""}</td>
-        <td style="${solde>0?'color:var(--orange);font-weight:600':(m.montantHT&&solde<=0?'color:var(--green);font-weight:600':'')}">${m.forfait?"—":(m.montantHT?fmt(solde,m.currency):"—")}</td>
+        <td>${montantCell}</td>
+        <td>${soldeCell}</td>
         <td style="font-size:11.5px">${docs}</td>
         <td><span class="badge ${m.status==='termine'?'b-green':m.status==='suspendue'?'b-grey':'b-blue'}">${m.status==='termine'?'Terminée':m.status==='suspendue'?'Suspendue':'En cours'}</span></td>
         <td><div class="rowact"><button class="iconbtn" onclick="openMissionForm('${m.id}')">✎</button><button class="iconbtn del" onclick="deleteMission('${m.id}')">🗑</button></div></td></tr>`;}).join("")+`</tbody></table>`
@@ -3960,6 +4022,9 @@ function renderMissions(){
 }
 function openMissionForm(id, prefillClientId, prefillAmount, prefillCur){
   const m=id?DB.missions.find(x=>x.id===id):{phase:"REVEAL",status:"en_cours",currency:prefillCur||DB.meta.defaultCurrency,nda:false,contrat:false,rapport:false,startDate:todayISO(),clientId:prefillClientId||"",montantHT:(prefillAmount!=null&&prefillAmount!=="")?prefillAmount:undefined};
+  const bmode=missionBilling(m);
+  const rec=(m&&m.id)?missionRecurring(m.id):null;
+  const abo=rec||{frequency:"annuel",amount:(prefillAmount!=null&&prefillAmount!=="")?prefillAmount:"",day:1,startDate:m.startDate||todayISO(),endDate:"",invoice:true};
   openModal(`
     <span class="close" onclick="closeModal()">✕</span>
     <h2>${id?"Modifier la mission":"Nouvelle mission"}</h2>
@@ -3971,11 +4036,17 @@ function openMissionForm(id, prefillClientId, prefillAmount, prefillCur){
       <select id="f-mphase">${R5_PHASES.map(p=>`<option value="${p}" ${m.phase===p?'selected':''}>${R5_LABELS[p]}</option>`).join("")}</select></div>
     <div class="field row2"><label>Dates début / fin prévue</label>
       <input type="date" id="f-mstart" value="${m.startDate||''}"><input type="date" id="f-mend" value="${m.endDate||''}"></div>
-    <div class="field"><label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" id="f-forfait" ${m.forfait?'checked':''} onchange="echToggleForfait()"> Couvert par un abonnement / forfait (aucun montant facturé à la mission)</label>
-      <div class="hint">Cochez si la mission est incluse dans un abonnement annuel déjà encaissé au Budget. L'auditeur ne saisit alors aucun montant — il déclare seulement ses <b>frais de mission</b> (validés par la direction).</div></div>
-    <div id="mission-billing" style="${m.forfait?'display:none':''}">
-    <div class="field row2"><label>Montant HT & devise</label>
-      <input type="number" id="f-mmontant" value="${m.montantHT!=null?m.montantHT:''}" oninput="echRecalcAll()"><select id="f-mcur" onchange="echRenderHint()">${curOptions(m.currency)}</select></div>
+    <div class="field"><label>Facturation de la mission</label>
+      <div class="segmented" style="display:flex;width:100%">
+        <button type="button" id="bil-ponctuel" class="${bmode==='ponctuel'?'active':''}" style="flex:1" onclick="missionSetBilling('ponctuel')">Ponctuel</button>
+        <button type="button" id="bil-abo" class="${bmode==='abonnement'?'active':''}" style="flex:1" onclick="missionSetBilling('abonnement')">🔁 Abonnement</button>
+        <button type="button" id="bil-forfait" class="${bmode==='forfait'?'active':''}" style="flex:1" onclick="missionSetBilling('forfait')">Forfait externe</button>
+      </div><input type="hidden" id="f-billing" value="${bmode}"></div>
+    <div class="field row2"><label>Devise</label><select id="f-mcur" onchange="echRenderHint()">${curOptions(m.currency)}</select><span></span></div>
+
+    <div id="mission-ponctuel" style="${bmode==='ponctuel'?'':'display:none'}">
+    <div class="field row2"><label>Montant HT</label>
+      <input type="number" id="f-mmontant" value="${m.montantHT!=null?m.montantHT:''}" oninput="echRecalcAll()"><span></span></div>
     <div class="field"><label>Échéancier de facturation <span style="font-weight:400;color:var(--muted);font-size:11.5px">— alimente automatiquement le Budget & le CA</span></label>
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:7px">
         <button type="button" class="chip" onclick="echPreset('full')">Tout en 1 fois</button>
@@ -3987,6 +4058,20 @@ function openMissionForm(id, prefillClientId, prefillAmount, prefillCur){
       <button type="button" class="cta ghost" style="margin-top:4px;padding:5px 10px;font-size:12.5px" onclick="echAddRow()">+ Ajouter une échéance</button>
       <div class="hint" id="ech-hint" style="margin-top:6px"></div></div>
     </div>
+
+    <div id="mission-abo" style="${bmode==='abonnement'?'':'display:none'}">
+      <div class="field row2"><label>Périodicité & montant par échéance</label>
+        <select id="f-abo-freq">${[["mensuel","Mensuel"],["trimestriel","Trimestriel"],["annuel","Annuel"]].map(f=>`<option value="${f[0]}" ${(abo.frequency||'annuel')===f[0]?'selected':''}>${f[1]}</option>`).join("")}</select>
+        <input type="number" id="f-abo-amount" min="0" step="any" placeholder="Montant / échéance" value="${abo.amount!=null?abo.amount:''}"></div>
+      <div class="field row2"><label>1re échéance (début) & fin (option)</label>
+        <input type="date" id="f-abo-start" value="${abo.startDate||todayISO()}"><input type="date" id="f-abo-end" value="${abo.endDate||''}"></div>
+      <div class="field row2"><label>Jour d'échéance & </label>
+        <input type="number" id="f-abo-day" min="1" max="28" value="${abo.day||1}" title="Jour du mois de l'échéance"><span></span></div>
+      <div class="field"><label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" id="f-abo-invoice" ${abo.invoice!==false?'checked':''}> 📄 Facturer chaque échéance et l'envoyer au client par e-mail (après vérification)</label></div>
+      <div class="hint">L'abonnement crée un récurrent lié à cette mission : chaque échéance remonte automatiquement dans la mission, le Budget, le CA et le compte de résultat. Une échéance échue reste « à encaisser » jusqu'à confirmation du règlement.</div>
+    </div>
+
+    <div id="mission-forfait" class="hint" style="${bmode==='forfait'?'':'display:none'};margin-top:-4px">Mission couverte par un forfait/abonnement <b>externe</b> déjà facturé ailleurs — <b>aucun montant n'est facturé à cette mission</b>. L'auditeur déclare seulement ses <b>frais de mission</b> (validés par la direction).</div>
     <div class="field"><label>Livrables</label>
       <label style="display:inline;font-weight:400"><input type="checkbox" id="f-nda" ${m.nda?'checked':''}> NDA</label>
       <label style="display:inline;font-weight:400;margin-left:14px"><input type="checkbox" id="f-contrat" ${m.contrat?'checked':''}> Contrat</label>
@@ -4062,35 +4147,155 @@ function syncMissionEcheances(mid, m){
   DB.transactions=DB.transactions.filter(t=>t.missionId!==mid || keep.includes(t.id));
 }
 function saveMission(id){
-  const forfait=document.getElementById("f-forfait").checked;
+  const billing=val("f-billing")||"ponctuel";
+  const forfait=billing==="forfait"; // rétro-compat avec l'ancien booléen
+  // Garde-fou abonnement : un montant par échéance est obligatoire.
+  if(billing==="abonnement"){
+    const a=parseFloat(val("f-abo-amount"));
+    if(isNaN(a)||a<=0){ toast("Abonnement : renseignez un montant par échéance."); return; }
+  }
   const obj={ref:val("f-ref").trim(),clientId:val("f-mclient"),type:val("f-mtype"),phase:val("f-mphase"),startDate:val("f-mstart"),endDate:val("f-mend"),
-    montantHT:forfait?0:(parseFloat(val("f-mmontant"))||0),currency:val("f-mcur"),forfait:forfait,
+    montantHT: billing==="ponctuel"?(parseFloat(val("f-mmontant"))||0):0, currency:val("f-mcur"), billing:billing, forfait:forfait,
     nda:document.getElementById("f-nda").checked,contrat:document.getElementById("f-contrat").checked,rapport:document.getElementById("f-rapport").checked,
     status:val("f-mstatus"),notes:val("f-mnotes")};
   let mid=id;
   const oldMs=id?(DB.missions.find(x=>x.id===id)||{}).status:null;
   if(id){Object.assign(DB.missions.find(x=>x.id===id),obj);}else{obj.id=uid();mid=obj.id;DB.missions.push(obj);}
   const m=DB.missions.find(x=>x.id===mid);
-  if(!id) notify("mission","Nouvelle mission"+(forfait?" (forfait/abonnement)":""), (obj.ref?obj.ref+" — ":"")+(obj.type||"Mission")+" · "+clientName(obj.clientId), {clientId:obj.clientId});
+  if(!id) notify("mission","Nouvelle mission"+(billing==="abonnement"?" (abonnement)":forfait?" (forfait)":""), (obj.ref?obj.ref+" — ":"")+(obj.type||"Mission")+" · "+clientName(obj.clientId), {clientId:obj.clientId});
   else if(oldMs!=="termine" && obj.status==="termine") notify("mission","Mission terminée", (obj.ref||obj.type||"Mission")+" · "+clientName(obj.clientId), {clientId:obj.clientId});
-  if(forfait){ // pas de facturation à la mission : on retire toute échéance de facturation liée
-    DB.transactions=DB.transactions.filter(t=>!(t.missionId===mid && t.sens==="entrant" && t.category==="Honoraires mission"));
-  } else {
+  if(billing==="abonnement"){
+    // Retire les échéances ponctuelles NON encaissées (l'encaissé est conservé), puis (re)crée le récurrent lié.
+    DB.transactions=DB.transactions.filter(t=>!(t.missionId===mid && !t.recurringId && t.sens==="entrant" && t.status==="prevu"));
+    syncMissionSubscription(mid, m);
+  } else if(billing==="forfait"){
+    removeMissionRecurring(mid);
+    DB.transactions=DB.transactions.filter(t=>!(t.missionId===mid && t.sens==="entrant" && t.status==="prevu"));
+  } else { // ponctuel
+    removeMissionRecurring(mid);
     syncMissionEcheances(mid, m);
   }
   // acompte = somme encaissée (échéances de facturation encaissées)
   m.acompte=DB.transactions.filter(t=>t.missionId===mid&&t.sens==="entrant"&&t.status==="realise").reduce((s,t)=>s+(t.amount||0),0);
   save();closeModal();refreshAll();toast("Mission enregistrée — Budget & CA mis à jour.");
 }
-function echToggleForfait(){ const on=document.getElementById("f-forfait").checked; const b=document.getElementById("mission-billing"); if(b) b.style.display=on?"none":""; }
+// (Re)crée/synchronise le récurrent d'abonnement lié à une mission depuis le formulaire.
+function syncMissionSubscription(mid, m){
+  const amount=Math.round(parseFloat(val("f-abo-amount"))||0);
+  const freq=val("f-abo-freq")||"annuel";
+  const day=Math.max(1,Math.min(28,parseInt(val("f-abo-day"))||1));
+  const start=val("f-abo-start")||todayISO();
+  const end=val("f-abo-end")||"";
+  const invoice=!!(document.getElementById("f-abo-invoice")&&document.getElementById("f-abo-invoice").checked);
+  const label=(m.ref?m.ref+" — ":"")+"Abonnement"+(m.type?" "+m.type:"");
+  let rc=missionRecurring(mid);
+  const obj={ sens:"entrant", label, amount, currency:val("f-mcur")||m.currency, category:"Abonnement annuel",
+    frequency:freq, day, startDate:start, endDate:end, clientId:m.clientId, missionId:mid,
+    invoice, entity:(rc&&rc.entity)||m.entity||"bsmac", active:true };
+  if(rc){
+    Object.assign(rc,obj);
+    // purge des échéances à venir (prévu) pour régénérer selon les nouveaux paramètres ; l'encaissé est conservé
+    DB.transactions=DB.transactions.filter(t=>!(t.recurringId===rc.id && t.status==="prevu"));
+  } else { obj.id=uid(); obj.created=todayISO(); DB.recurring.push(obj); }
+  generateRecurring();
+}
+// Détache le récurrent d'abonnement d'une mission : retire la définition + les échéances à venir, conserve l'encaissé.
+function removeMissionRecurring(mid){
+  const rc=missionRecurring(mid); if(!rc) return;
+  DB.recurring=DB.recurring.filter(r=>r.id!==rc.id);
+  DB.transactions=DB.transactions.filter(t=>!(t.recurringId===rc.id && t.status==="prevu"));
+  DB.transactions.forEach(t=>{ if(t.recurringId===rc.id) t.recurringId=""; }); // l'historique encaissé reste lié à la mission
+}
+
+/* ---- Facturation & envoi client (échéances marquées « facturables ») ---- */
+// Échéances facturables au client. pending=true → non encore envoyées par e-mail.
+function billableInvoices(pending){
+  return DB.transactions.filter(t=>t.invoice && t.sens==="entrant" && inEntity(t) && (!pending || !t.emailedAt))
+    .sort((a,b)=>String(a.dueDate||a.date).localeCompare(String(b.dueDate||b.date)));
+}
+// Panneau « Factures à envoyer » injecté dans le Budget (direction).
+function invoicePanelHtml(){
+  if(!isDirection()) return "";
+  const due=billableInvoices(true);
+  if(!due.length) return "";
+  const rows=due.map(t=>{
+    const c=DB.clients.find(x=>x.id===t.clientId);
+    const noMail=!(c&&(c.contactEmail||"").trim())?' <span class="badge b-orange" title="Aucune adresse e-mail sur la fiche client">e-mail manquant</span>':"";
+    const late=(t.dueDate||t.date)<todayISO();
+    return `<div class="li"><span><b>${esc(t.label)}</b> · ${esc(clientName(t.clientId))}${noMail}<br><span style="color:var(--muted);font-size:11px">échéance ${frDate(t.dueDate||t.date)}${late?' <span style="color:var(--red)">(échue)</span>':''} · ${t.status==="realise"?"encaissé":"à encaisser"}</span></span>
+      <span style="display:flex;gap:8px;align-items:center"><b>${fmt(t.amount,t.currency)}</b><button class="cta ghost sm" onclick="openInvoiceSend('${t.id}')">✉ Vérifier &amp; envoyer</button></span></div>`;
+  }).join("");
+  return `<div class="card" style="border-left:3px solid var(--gold)">
+    <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">📄 Factures à envoyer (${due.length})</h2></div>
+    <div class="hint" style="margin:6px 0 8px">Échéances d'abonnement / facturation à transmettre au client. Vous contrôlez puis envoyez : <b>vrai e-mail</b> via le pont Google.</div>
+    <div class="mini-list">${rows}</div></div>`;
+}
+function openInvoiceSend(txId){
+  const t=DB.transactions.find(x=>x.id===txId); if(!t) return;
+  const c=DB.clients.find(x=>x.id===t.clientId)||{};
+  const to=(c.contactEmail||"").trim();
+  openModal(`<span class="close" onclick="closeModal()">✕</span>
+    <h2>✉ Facture — ${esc(t.label)}</h2>
+    <div class="msub">Contrôlez les informations avant l'envoi réel au client.</div>
+    <div class="mini-list" style="margin:8px 0 12px">
+      <div class="li"><span>Client</span><b>${esc(clientName(t.clientId))}</b></div>
+      ${t.missionId?`<div class="li"><span>Mission</span><b>${esc(missionRef(t.missionId))}</b></div>`:""}
+      <div class="li"><span>Échéance</span><b>${frDate(t.dueDate||t.date)}</b></div>
+      <div class="li"><span>Montant</span><b>${fmt(t.amount,t.currency)}</b></div>
+    </div>
+    <div class="field"><label>Adresse d'envoi (modifiable)</label><input id="inv-to" value="${esc(to)}" placeholder="client@exemple.com"></div>
+    <div class="field"><label>Message d'accompagnement (option)</label><textarea id="inv-msg" rows="2" placeholder="Mot au client…" style="width:100%;font-family:inherit;padding:8px;border:1px solid var(--line);border-radius:8px"></textarea></div>
+    <div class="hint">La date d'envoi sera conservée (accusé). L'échéance reste « à encaisser » — marquez-la encaissée à réception du règlement.</div>
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="sendInvoiceEmail('${t.id}')">Envoyer la facture</button></div>`);
+}
+async function sendInvoiceEmail(txId){
+  const t=DB.transactions.find(x=>x.id===txId); if(!t) return;
+  const to=(val("inv-to")||"").trim();
+  if(!to){ toast("Renseignez l'adresse e-mail du client."); return; }
+  const html=invoiceHtml(t,(val("inv-msg")||"").trim());
+  try{
+    await googleCall("mail",{to,subject:"[BSM] Facture — "+t.label+" — échéance "+frDate(t.dueDate||t.date),html});
+    t.emailedAt=todayISO(); t.emailedTo=to; save(); closeModal(); refreshAll();
+    toast("Facture envoyée à "+to+" ✅");
+  }catch(e){ toast("Échec de l'envoi : "+e.message); }
+}
+function invoiceHtml(t,msg){
+  const c=DB.clients.find(x=>x.id===t.clientId)||{};
+  const cab=DB.meta.cabinetName||"BSM Advisory & Consulting";
+  return `<div style="font-family:Arial,sans-serif;color:#1A1A1A;max-width:640px">
+    <div style="border-bottom:3px solid #B5923A;padding-bottom:8px;margin-bottom:14px"><span style="color:#0D1F45;font-weight:700;font-size:18px">${esc(cab)}</span></div>
+    <p>Bonjour${c.contactName?" "+esc(c.contactName):""},</p>
+    ${msg?`<p>${esc(msg)}</p>`:""}
+    <p>Veuillez trouver ci-dessous l'échéance de facturation :</p>
+    <table style="border-collapse:collapse;width:100%;font-size:14px">
+      <tr><td style="padding:6px 8px;color:#6B7280">Objet</td><td style="padding:6px 8px;font-weight:600">${esc(t.label)}</td></tr>
+      ${t.missionId?`<tr><td style="padding:6px 8px;color:#6B7280">Mission</td><td style="padding:6px 8px">${esc(missionRef(t.missionId))}</td></tr>`:""}
+      <tr><td style="padding:6px 8px;color:#6B7280">Échéance</td><td style="padding:6px 8px">${frDate(t.dueDate||t.date)}</td></tr>
+      <tr><td style="padding:6px 8px;color:#6B7280">Montant</td><td style="padding:6px 8px;font-weight:700;font-size:16px">${fmt(t.amount,t.currency)}</td></tr>
+    </table>
+    <p style="margin-top:14px">Nous vous remercions de votre confiance.</p>
+    <p style="color:#6B7280;font-size:12px">${esc(cab)} · document généré par le Cockpit BSM le ${frDate(todayISO())}.</p>
+  </div>`;
+}
+function missionSetBilling(mode){
+  document.getElementById("f-billing").value=mode;
+  ["ponctuel","abo","forfait"].forEach(k=>{ const b=document.getElementById("bil-"+(k==="abo"?"abo":k)); if(b) b.classList.toggle("active", (k==="abo"?"abonnement":k)===mode); });
+  const show=(elid,on)=>{ const e=document.getElementById(elid); if(e) e.style.display=on?"":"none"; };
+  show("mission-ponctuel", mode==="ponctuel");
+  show("mission-abo", mode==="abonnement");
+  show("mission-forfait", mode==="forfait");
+}
 function missionEncaisse(id){ return DB.transactions.filter(t=>t.missionId===id&&t.sens==="entrant"&&t.status==="realise").reduce((s,t)=>s+(t.amount||0),0); }
 function deleteMission(id){
   const linkedRisks=DB.risks.filter(r=>r.missionId===id).length;
   const linkedTx=DB.transactions.filter(t=>t.missionId===id).length;
+  const rc=missionRecurring(id);
   confirmModal("Supprimer cette mission ?",
     (linkedRisks?`${linkedRisks} risque(s) y sont liés (ils perdront le lien). `:"")+
+    (rc?`L'<b>abonnement récurrent lié</b> sera également supprimé. `:"")+
     (linkedTx?`<b>${linkedTx} ligne(s) de facturation liée(s)</b> seront supprimées du Budget & CA. `:"")+"Action définitive.",
     ()=>{DB.missions=DB.missions.filter(x=>x.id!==id);DB.risks.forEach(r=>{if(r.missionId===id)r.missionId="";});
+      if(rc) DB.recurring=DB.recurring.filter(r=>r.id!==rc.id);
       DB.transactions=DB.transactions.filter(t=>t.missionId!==id);
       save();refreshAll();toast("Mission supprimée.");});
 }
