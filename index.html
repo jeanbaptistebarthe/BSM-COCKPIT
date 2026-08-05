@@ -20,7 +20,13 @@
   .brand span{color:var(--gold);}
   .topbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
   .tb-btn{border:1px solid var(--line);background:#fff;padding:7px 12px;border-radius:6px;font-size:12.5px;cursor:pointer;color:var(--navy);font-weight:600;}
-  .tb-btn:hover{background:var(--cream);}
+  .tb-btn:hover{background:var(--cream);border-color:var(--gold);}
+  .tb-menu{position:absolute;right:0;top:calc(100% + 6px);background:#fff;border:1px solid var(--line);border-radius:11px;box-shadow:0 12px 32px rgba(16,42,67,.16);padding:6px;min-width:212px;z-index:60;display:none;}
+  .tb-menu.open{display:block;animation:bsmFade .16s ease both;}
+  .tb-menu button{display:flex;width:100%;gap:9px;align-items:center;background:none;border:none;padding:9px 11px;border-radius:8px;font-size:13px;color:var(--navy);cursor:pointer;text-align:left;font-family:inherit;}
+  .tb-menu button:hover{background:var(--cream);}
+  body.dark .tb-menu{background:#16202e;border-color:#273241;}
+  body.dark .tb-menu button{color:var(--ink);} body.dark .tb-menu button:hover{background:#1b2736;}
   .app{display:flex;min-height:calc(100vh - 53px);}
   .sidebar{width:210px;background:linear-gradient(180deg,#143253 0%,#0D2137 100%);color:#fff;display:flex;flex-direction:column;padding:18px 0;flex-shrink:0;box-shadow:2px 0 16px rgba(16,42,67,.10);}
   .sidebar .logo{font-size:11px;letter-spacing:.08em;color:var(--gold);padding:0 18px 14px;border-bottom:1px solid rgba(255,255,255,.12);margin-bottom:8px;}
@@ -53,11 +59,13 @@
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
   .grid2.wide{grid-template-columns:1.5fr 1fr;}
   table{width:100%;border-collapse:collapse;font-size:13px;}
-  th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;letter-spacing:.03em;text-transform:uppercase;padding:8px 10px;border-bottom:1px solid var(--line);}
-  td{padding:10px;border-bottom:1px solid var(--line);vertical-align:middle;}
+  th{text-align:left;color:var(--muted);font-weight:700;font-size:11px;letter-spacing:.04em;text-transform:uppercase;padding:9px 10px;border-bottom:1.5px solid var(--line);background:#FBF9F4;}
+  td{padding:10px;border-bottom:1px solid #F0ECE1;vertical-align:middle;}
   tr:last-child td{border-bottom:none;}
-  tbody tr:hover{background:#FCFAF5;}
-  table.clickrows tbody tr:hover{background:#F3F1E8;box-shadow:inset 3px 0 0 var(--gold);}
+  tbody tr:nth-child(even){background:#FCFBF7;}
+  tbody tr{transition:background .12s ease,box-shadow .12s ease;}
+  tbody tr:hover{background:#F3EFE4;}
+  table.clickrows tbody tr:hover{background:#F1ECDD;box-shadow:inset 3px 0 0 var(--gold);}
   .badge{display:inline-block;padding:3px 9px;border-radius:12px;font-size:11px;font-weight:600;white-space:nowrap;}
   .b-actif{background:#E7F3EC;color:var(--green);} .b-prospect{background:#FEF3E2;color:var(--amber);} .b-archive{background:#F1F1F1;color:var(--muted);}
   .b-red{background:#FBEAE8;color:var(--red);} .b-orange{background:#FDF1E3;color:var(--orange);} .b-green{background:#E7F3EC;color:var(--green);} .b-blue{background:#E6EEFB;color:var(--blue);} .b-grey{background:#F1F1F1;color:var(--muted);}
@@ -72,7 +80,19 @@
   .searchbox{margin-left:auto;padding:8px 13px;border:1px solid var(--line);border-radius:9px;font-size:13px;min-width:200px;transition:border-color .13s ease,box-shadow .13s ease;}
   .searchbox:focus,input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px rgba(199,162,90,.15);}
   .screen{display:none;} .screen.active{display:block;}
-  .empty{color:var(--muted);font-size:13px;text-align:center;padding:34px 10px;}
+  /* Micro-interactions & chargement */
+  @keyframes bsmFade{from{opacity:0;transform:translateY(8px) scale(.99)}to{opacity:1;transform:none}}
+  #modal-content{animation:bsmFade .2s ease both;}
+  @keyframes bsmShimmer{0%{background-position:-360px 0}100%{background-position:360px 0}}
+  .skeleton{background:#EEE9DE;background-image:linear-gradient(90deg,#EEE9DE 0,#F7F3EA 180px,#EEE9DE 360px);background-size:600px 100%;animation:bsmShimmer 1.15s linear infinite;border-radius:7px;height:13px;margin:9px 0;}
+  .skeleton.lg{height:17px;width:55%} .skeleton.w80{width:80%} .skeleton.w40{width:40%} .skeleton.w90{width:90%}
+  .ai-typing{display:inline-flex;gap:5px;align-items:center;padding:3px 2px;}
+  .ai-typing i{width:7px;height:7px;border-radius:50%;background:var(--gold);display:inline-block;animation:bsmBlink 1s infinite ease-in-out;}
+  .ai-typing i:nth-child(2){animation-delay:.18s} .ai-typing i:nth-child(3){animation-delay:.36s}
+  @keyframes bsmBlink{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}
+  body.dark .skeleton{background:#243244;background-image:linear-gradient(90deg,#243244 0,#2f4157 180px,#243244 360px);}
+  .empty{color:var(--muted);font-size:13px;text-align:center;padding:28px 16px;border:1px dashed var(--line);border-radius:12px;background:#FCFBF7;}
+  td .empty,th .empty{border:none;background:none;}
   /* bars */
   .bars{display:flex;align-items:flex-end;gap:10px;height:150px;margin-top:10px;}
   .bar-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;}
@@ -221,14 +241,19 @@
   body.dark .brand span{color:var(--gold);}
   body.dark .kpi .v{color:var(--ink);}
   body.dark .kpi .v.warn{color:var(--orange);} body.dark .kpi .v.danger{color:var(--red);} body.dark .kpi .v.good{color:var(--green);}
-  body.dark table th{color:var(--muted);}
+  body.dark table th{color:var(--muted);background:#16202e;border-bottom-color:#273241;}
+  body.dark td{border-bottom-color:#22303f;}
+  body.dark tbody tr:nth-child(even){background:#141d29;}
   body.dark tbody tr:hover{background:#1b2736;}
+  body.dark table.clickrows tbody tr:hover{background:#1f2c3d;}
+  body.dark .empty{background:#141d29;border-color:#273241;}
   body.dark .tb-btn:hover,body.dark .iconbtn:hover,body.dark .chip:hover,body.dark .gs-item:hover{background:#1b2736;}
   body.dark .cal .day.out{background:#111a26;color:#3a4757;}
   body.dark .infobox{background:#14212f;border-color:#273241;color:#cdd6e2;}
   body.dark .modcard.sel,body.dark .imp-mode.sel{background:#1c2836;}
-  .ai-fab{position:fixed;bottom:22px;right:22px;width:56px;height:56px;border-radius:50%;background:var(--navy);color:#fff;border:2px solid var(--gold);font-size:24px;cursor:pointer;box-shadow:0 6px 20px rgba(16,42,67,.35);z-index:90;}
-  .ai-fab:hover{background:var(--navy-light);}
+  .ai-fab{position:fixed;bottom:22px;right:22px;width:58px;height:58px;border-radius:50%;background:radial-gradient(circle at 32% 28%,#264a78,#0D2137);color:#fff;border:2px solid var(--gold);cursor:pointer;box-shadow:0 8px 24px rgba(16,42,67,.38);z-index:90;display:flex;align-items:center;justify-content:center;transition:transform .16s ease,box-shadow .16s ease;}
+  .ai-fab:hover{transform:translateY(-2px) scale(1.04);box-shadow:0 12px 30px rgba(16,42,67,.46);}
+  .ai-badge{display:inline-flex;width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,#264a78,#0D2137);align-items:center;justify-content:center;border:1px solid rgba(199,162,90,.55);flex-shrink:0;}
   .ai-drawer{position:fixed;top:0;right:0;width:400px;max-width:96vw;height:100vh;background:var(--cream);border-left:1px solid var(--line);box-shadow:-8px 0 30px rgba(0,0,0,.14);transform:translateX(105%);transition:transform .25s;z-index:400;display:flex;flex-direction:column;}
   .ai-drawer.open{transform:translateX(0);}
   .ai-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:var(--navy);color:#fff;flex-shrink:0;}
@@ -276,17 +301,22 @@
   <div class="topbar-right">
     <button class="tb-btn" id="home-btn" onclick="goHome()" title="Revenir au tableau de bord" style="display:none;font-weight:700;color:var(--navy)">← Tableau de bord</button>
     <div class="gsearch"><input id="globalsearch" placeholder="Rechercher un client, risque…" autocomplete="off" oninput="globalSearch(this.value)" onblur="setTimeout(hideSearch,180)"><div class="gs-results" id="gs-results"></div></div>
-    <button class="tb-btn" onclick="openImport()" title="Importer depuis le Sheet R5 / CSV">⇊ Importer R5</button>
     <button class="tb-btn" id="notif-bell" onclick="goNotifications()" title="Notifications — activité récente" style="position:relative;display:none">🔔<span id="notif-count" style="display:none;position:absolute;top:-5px;right:-5px;background:var(--red);color:#fff;border-radius:9px;min-width:16px;height:16px;font-size:10px;line-height:16px;padding:0 3px;font-weight:700;text-align:center">0</span></button>
     <button class="tb-btn" id="theme-btn" onclick="toggleTheme()" title="Thème clair / sombre">🌙</button>
-    <button class="tb-btn" id="logout-btn" onclick="lockPortal()" title="Se déconnecter">🔒</button>
     <span id="server-status" class="tb-btn" style="display:none;align-items:center;gap:4px" title="État de la connexion au serveur BSM"></span>
     <span id="cloud-status" class="tb-btn" style="display:none;align-items:center;gap:4px" title="État de la synchronisation cloud (Supabase)"></span>
     <span id="currency-indicator" class="tb-btn" onclick="openSettings()" title="Devise & paramètres">Ar / €</span>
-    <button class="tb-btn" onclick="exportData()">⬇ Sauvegarde</button>
-    <button class="tb-btn" onclick="document.getElementById('import-file').click()">⬆ Restaurer</button>
+    <button class="tb-btn" onclick="openSettings()" title="Paramètres">⚙</button>
+    <div class="tb-more" style="position:relative">
+      <button class="tb-btn" onclick="toggleTopMenu()" title="Plus d'actions" aria-label="Plus d'actions">⋯</button>
+      <div id="tb-menu" class="tb-menu">
+        <button onclick="closeTopMenu();openImport()">⇊&nbsp; Importer R5</button>
+        <button onclick="closeTopMenu();exportData()">⬇&nbsp; Sauvegarde (fichier)</button>
+        <button onclick="closeTopMenu();document.getElementById('import-file').click()">⬆&nbsp; Restaurer (fichier)</button>
+        <button id="logout-btn" onclick="closeTopMenu();lockPortal()">🔒&nbsp; Se déconnecter</button>
+      </div>
+    </div>
     <input type="file" id="import-file" accept="application/json" style="display:none" onchange="importData(event)">
-    <button class="tb-btn" onclick="openSettings()">⚙</button>
   </div>
 </div>
 
@@ -366,10 +396,10 @@
   </div>
 </div>
 
-<button id="ai-fab" class="ai-fab" onclick="openAiChat()" title="Assistant IA">🤖</button>
+<button id="ai-fab" class="ai-fab" onclick="openAiChat()" title="Assistant IA"><svg width="28" height="28" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M16 5.5l2.3 6.2 6.2 2.3-6.2 2.3L16 22.5l-2.3-6.2-6.2-2.3 6.2-2.3z" fill="#C7A25A"/><circle cx="24.5" cy="8" r="1.7" fill="#fff"/><circle cx="8.5" cy="23.5" r="1.3" fill="#C7A25A" opacity=".75"/></svg></button>
 <div class="ai-drawer" id="ai-drawer">
   <div class="ai-head">
-    <div><b>🤖 Assistant BSM</b><div class="ai-sub">Conversation · mémoire · accès à tes données</div></div>
+    <div style="display:flex;align-items:center;gap:9px"><span class="ai-badge"><svg width="17" height="17" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M16 5.5l2.3 6.2 6.2 2.3-6.2 2.3L16 22.5l-2.3-6.2-6.2-2.3 6.2-2.3z" fill="#C7A25A"/><circle cx="24.5" cy="8" r="1.7" fill="#fff"/></svg></span><div><b>Assistant BSM</b><div class="ai-sub">Conversation · mémoire · accès à tes données</div></div></div>
     <div style="display:flex;gap:6px">
       <button class="iconbtn" onclick="toggleAiMemory()" title="Mémoire de l'assistant">🧠</button>
       <button class="iconbtn" onclick="clearAiChat()" title="Nouvelle conversation">🗑</button>
@@ -1126,6 +1156,9 @@ function refreshAll(){
   updateNotifBell();
 }
 function goHome(){ if(!currentUser) return; setScreen(can("dashboard")?"dashboard":firstAllowedScreen()); }
+function toggleTopMenu(){ const m=document.getElementById("tb-menu"); if(m) m.classList.toggle("open"); }
+function closeTopMenu(){ const m=document.getElementById("tb-menu"); if(m) m.classList.remove("open"); }
+document.addEventListener("click",function(e){ if(!e.target.closest(".tb-more")) closeTopMenu(); });
 
 /* ----------------------------- Agrégations ----------------------------- */
 function curYear(){ return new Date().getFullYear(); }
@@ -1750,7 +1783,7 @@ function renderClientFiche(){
       <div style="font-size:11px;color:var(--muted);letter-spacing:.04em;margin-bottom:8px">✦ ACTIONS — tout pour ce client, ici</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
         ${can("missions")?`<button class="cta sm" onclick="openMissionForm(null,'${c.id}')">＋ Mission / abonnement</button>`:""}
-        ${can("reports")?`<button class="cta sm" onclick="startAuditReport('${c.id}')">🛡️ Rapport d'audit IA</button>`:""}
+        ${isDirection()?`<button class="cta sm" onclick="startAuditReport('${c.id}')">🛡️ Rapport d'audit IA</button>`:""}
         ${canFinance()?`<button class="cta ghost sm" onclick="aiClientAdvice('${c.id}')">🤖 Conseil IA</button>`:""}
         <button class="cta ghost sm" onclick="openClientPortal('${c.id}')">🔗 Portail client</button>
         ${canFinance()?`<button class="cta ghost sm" onclick="printClientReport('${c.id}')">🖨 Rapport interne</button>`:""}
@@ -6072,7 +6105,7 @@ function mdToHtml(md){
 function reportTypeLabel(k){ const t=REPORT_TYPES.find(x=>x.key===k); return t?t.label:k; }
 // Depuis la fiche client : génère directement le rapport d'audit IA de sa mission (raccourci ergonomie).
 function startAuditReport(clientId){
-  if(!(isAdmin()||can("reports"))){ toast("Accès aux rapports non autorisé."); return; }
+  if(!isDirection()){ toast("🔒 Rapports IA réservés à la direction."); return; }
   const ms=DB.missions.filter(m=>m.clientId===clientId);
   const audit=ms.find(m=>/audit/i.test(m.type||"")) || ms.find(m=>DB.risks.some(r=>r.missionId===m.id)) || ms[0];
   if(!audit){ toast("Crée d'abord une mission d'audit pour ce client."); openMissionForm(null,clientId); return; }
@@ -6222,7 +6255,8 @@ function emailReport(id){ const r=(DB.reports||[]).find(x=>x.id===id); if(!r) re
 function deleteReport(id){ confirmModal("Supprimer ce rapport ?","Il sera retiré de l'archive.", function(){ DB.reports=(DB.reports||[]).filter(function(r){return r.id!==id;}); save(); closeModal(); renderReports(); toast("Rapport supprimé."); }); }
 function renderReports(){
   const host=document.getElementById("scr-reports"); if(!host) return;
-  if(!(isAdmin()||can("reports"))){ host.innerHTML=""; return; }
+  // Rapports IA réservés à la DIRECTION : les collaborateurs apprennent le métier, ils ne « génèrent » pas un rapport tout fait.
+  if(!isDirection()){ host.innerHTML=`<div class="pagetitle"><div><h1>Rapports ZEUS</h1><div class="sub">Rapports IA</div></div></div><div class="card"><div class="empty">🔒 Réservé à la direction. Les rapports IA (audit, client, synthèse) sont générés et validés par la direction avant diffusion.</div></div>`; return; }
   if(window.repGenType==null) window.repGenType="hebdo"; window.repFilter=window.repFilter||"";
   const rt=REPORT_TYPES.find(t=>t.key===window.repGenType)||REPORT_TYPES[0];
   const typeOpts=REPORT_TYPES.map(t=>`<option value="${t.key}" ${window.repGenType===t.key?"selected":""}>${t.icon} ${esc(t.label)}</option>`).join("");
@@ -6308,11 +6342,12 @@ function buildMissionAuditContext(m){
   if(recos.length){ t+=`Recommandations (${recos.length}) :\n`; recos.forEach(r=>{ t+=`- [${r.ref||""}] ${r.texte} (priorité ${r.priorite||"—"}, avancement ${r.avancement||0}%${r.clientDecision?", décision client : "+r.clientDecision:""})\n`; }); }
   return t.length>6500?t.slice(0,6500)+"…":t;
 }
+function aiSkeleton(){ return '<div class="skeleton lg"></div><div class="skeleton w90"></div><div class="skeleton w80"></div><div class="skeleton"></div><div class="skeleton w40"></div><div class="hint" style="margin-top:6px">✦ L\'assistant rédige…</div>'; }
 async function aiGenerateAdvice(){
   const btn=document.getElementById("ai-gen-btn"), out=document.getElementById("ai-advice-out");
   if(!out) return;
   if(btn){ btn.disabled=true; btn.textContent="⏳ Analyse…"; }
-  out.innerHTML=`<div class="hint">Génération en cours…</div>`;
+  out.innerHTML=aiSkeleton();
   try{
     const sys="Tu es un consultant senior en gouvernance des risques chez BSM Advisory & Consulting (méthode R5, Madagascar). À partir des données du portefeuille, propose 3 à 5 conseils d'action concrets et priorisés, chacun en 1-2 phrases, orientés décision. Précis et actionnable. Format : liste à puces, sans préambule ni conclusion.";
     const res=await aiChat(sys, "Données du portefeuille :\n"+buildAIContext(), 1600, "conseils");
@@ -6343,7 +6378,7 @@ async function aiAskQuestion(){
 async function aiClientAdvice(id){
   const c=DB.clients.find(x=>x.id===id); if(!c) return;
   if(!aiProviderConf()){ toast("Configure une clé IA (Mammouth ou Mistral) dans ⚙ Paramètres."); openSettings(); return; }
-  openModal(`<span class="close" onclick="closeModal()">✕</span><h2>🤖 Conseil IA — ${esc(c.company)}</h2><div class="msub">Généré à partir des données de ce client.</div><div id="cai-out"><div class="hint">Génération en cours…</div></div>`);
+  openModal(`<span class="close" onclick="closeModal()">✕</span><h2>🤖 Conseil IA — ${esc(c.company)}</h2><div class="msub">Généré à partir des données de ce client.</div><div id="cai-out">${aiSkeleton()}</div>`);
   try{
     const sys="Tu es consultant senior en gouvernance des risques chez BSM Advisory & Consulting (méthode R5). Rédige pour ce client : une synthèse de suivi (2-3 phrases) puis 3 conseils d'action priorisés, concrets et actionnables. Concis, orienté décision, sans préambule.";
     const res=await aiChat(sys, buildClientContext(c), 1400, "client-advice");
@@ -6388,7 +6423,7 @@ async function sendAiChat(){
   if(inp) inp.value="";
   DB.aiChat.push({role:"user",content:q}); save(); renderAiChat();
   const el=document.getElementById("ai-msgs");
-  const typing=document.createElement("div"); typing.className="ai-msg bot"; typing.textContent="…";
+  const typing=document.createElement("div"); typing.className="ai-msg bot"; typing.innerHTML='<span class="ai-typing"><i></i><i></i><i></i></span>';
   if(el){ el.appendChild(typing); el.scrollTop=el.scrollHeight; }
   try{
     const history=DB.aiChat.slice(-20).map(function(m){return{role:m.role,content:m.content};});
