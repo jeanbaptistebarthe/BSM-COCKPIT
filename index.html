@@ -1173,6 +1173,12 @@ function applyNavGroupState(h, collapsed){
   }
 }
 function initNavGroups(){
+  // 1er lancement : sidebar ÉPURÉE par défaut → tous les groupes repliés (celui de l'onglet actif s'ouvre ensuite).
+  if(!DB.meta.navCollapsed){
+    DB.meta.navCollapsed={};
+    document.querySelectorAll(".sidebar .navgroup").forEach(function(h){ const k=(h.textContent||"").trim(); if(k) DB.meta.navCollapsed[k]=true; });
+    save();
+  }
   const nc=DB.meta.navCollapsed||{};
   document.querySelectorAll(".sidebar .navgroup").forEach(function(h){
     if(!h.dataset.group){
