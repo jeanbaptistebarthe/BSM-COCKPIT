@@ -234,9 +234,27 @@
   .ai-mem-item{display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--line);}
   .ai-msgs{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;}
   .ai-empty{color:var(--muted);font-size:13px;text-align:center;margin:auto;padding:20px;line-height:1.55;}
-  .ai-msg{max-width:86%;padding:9px 12px;border-radius:12px;font-size:13px;line-height:1.5;}
-  .ai-msg.user{align-self:flex-end;background:var(--navy);color:#fff;border-bottom-right-radius:3px;}
-  .ai-msg.bot{align-self:flex-start;background:#fff;border:1px solid var(--line);border-bottom-left-radius:3px;color:var(--ink);}
+  .ai-msg{max-width:88%;padding:10px 13px;border-radius:14px;font-size:13px;line-height:1.55;}
+  .ai-msg.user{align-self:flex-end;background:var(--navy);color:#fff;border-bottom-right-radius:4px;box-shadow:0 1px 4px rgba(16,42,67,.18);}
+  .ai-msg.bot{align-self:flex-start;background:#fff;border:1px solid var(--line);border-bottom-left-radius:4px;color:var(--ink);max-width:94%;box-shadow:0 1px 5px rgba(16,42,67,.06);}
+  /* Rendu premium des réponses IA (markdown → mise en forme, plus de * ou # bruts) */
+  .ai-md > :first-child{margin-top:0;} .ai-md > :last-child{margin-bottom:0;}
+  .ai-md p{margin:6px 0;} .ai-md strong{color:var(--navy);} .ai-md em{color:var(--ink);}
+  .ai-md h1,.ai-md h2,.ai-md h3,.ai-md h4{color:var(--navy);margin:12px 0 5px;line-height:1.25;font-weight:700;}
+  .ai-md h1{font-size:15px;} .ai-md h2{font-size:14px;} .ai-md h3{font-size:13px;} .ai-md h4{font-size:12.5px;color:var(--gold);}
+  .ai-md ul,.ai-md ol{margin:5px 0 5px 18px;padding:0;} .ai-md li{margin:3px 0;}
+  .ai-md hr{border:none;border-top:1px solid var(--line);margin:10px 0;}
+  .ai-md code{background:#f1efe6;border-radius:4px;padding:1px 5px;font-size:12px;font-family:ui-monospace,Menlo,Consolas,monospace;}
+  .ai-md .md-table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12px;display:block;overflow-x:auto;}
+  .ai-md .md-table th{background:var(--navy);color:#fff;text-align:left;padding:6px 8px;font-size:11px;white-space:nowrap;}
+  .ai-md .md-table td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top;}
+  .ai-md .md-table tr:nth-child(even) td{background:#faf8f2;}
+  /* Tableaux markdown premium partout (rapports, aperçus…) */
+  table.md-table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13px;}
+  table.md-table th{background:#0D1F45;color:#fff;text-align:left;padding:7px 9px;font-size:11.5px;}
+  table.md-table td{padding:7px 9px;border-bottom:1px solid #e5e0d5;vertical-align:top;}
+  body.dark .ai-md strong,body.dark .ai-md h1,body.dark .ai-md h2,body.dark .ai-md h3{color:#cfe0f5;}
+  body.dark .ai-md code{background:#22303f;}
   .ai-remember{display:block;margin-top:6px;background:none;border:none;color:var(--gold);font-size:11px;cursor:pointer;padding:0;font-weight:600;}
   .ai-input{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line);background:var(--cream);flex-shrink:0;}
   .ai-input textarea{flex:1;resize:none;padding:9px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit;max-height:120px;}
@@ -5986,16 +6004,30 @@ const REPORT_TYPES=[
 /* Markdown → HTML : rend les rapports proprement (titres, gras, puces) au lieu d'afficher le markdown brut. */
 function mdToHtml(md){
   const esch=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-  const inl=s=>esch(s).replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>").replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g,"$1<em>$2</em>");
+  const inl=s=>esch(s).replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>").replace(/`([^`]+)`/g,"<code>$1</code>").replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g,"$1<em>$2</em>");
+  const isRow=l=>/^\s*\|.*\|\s*$/.test(l);
+  const isSep=l=>/^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(l);
+  const cells=l=>l.replace(/^\s*\|/,"").replace(/\|\s*$/,"").split("|").map(c=>c.trim());
   const lines=String(md||"").split(/\r?\n/); let out="", lt=null;
   const close=()=>{ if(lt){ out+=(lt==="ul"?"</ul>":"</ol>"); lt=null; } };
-  lines.forEach(raw=>{ const line=raw.replace(/\s+$/,""); let m;
-    if(/^\s*$/.test(line)){ close(); return; }
-    if((m=line.match(/^(#{1,6})\s+(.*)$/))){ close(); const lv=Math.min(m[1].length,4); out+="<h"+lv+">"+inl(m[2])+"</h"+lv+">"; return; }
-    if((m=line.match(/^\s*[-*+]\s+(.*)$/))){ if(lt!=="ul"){ close(); out+="<ul>"; lt="ul"; } out+="<li>"+inl(m[1])+"</li>"; return; }
-    if((m=line.match(/^\s*\d+[.)]\s+(.*)$/))){ if(lt!=="ol"){ close(); out+="<ol>"; lt="ol"; } out+="<li>"+inl(m[1])+"</li>"; return; }
-    if(/^\s*-{3,}\s*$/.test(line)){ close(); out+="<hr>"; return; }
-    close(); out+="<p>"+inl(line)+"</p>"; });
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i].replace(/\s+$/,""); let m;
+    // Tableau markdown : ligne « | … | » suivie d'une ligne séparateur « | --- | --- | »
+    if(isRow(line) && i+1<lines.length && isSep(lines[i+1])){
+      close();
+      const head=cells(line);
+      let tb="<table class=\"md-table\"><thead><tr>"+head.map(h=>"<th>"+inl(h)+"</th>").join("")+"</tr></thead><tbody>";
+      i+=2;
+      for(; i<lines.length && isRow(lines[i]); i++){ const cs=cells(lines[i]); tb+="<tr>"+cs.map(c=>"<td>"+inl(c)+"</td>").join("")+"</tr>"; }
+      i--; tb+="</tbody></table>"; out+=tb; continue;
+    }
+    if(/^\s*$/.test(line)){ close(); continue; }
+    if((m=line.match(/^(#{1,6})\s+(.*)$/))){ close(); const lv=Math.min(m[1].length,4); out+="<h"+lv+">"+inl(m[2])+"</h"+lv+">"; continue; }
+    if((m=line.match(/^\s*[-*+]\s+(.*)$/))){ if(lt!=="ul"){ close(); out+="<ul>"; lt="ul"; } out+="<li>"+inl(m[1])+"</li>"; continue; }
+    if((m=line.match(/^\s*\d+[.)]\s+(.*)$/))){ if(lt!=="ol"){ close(); out+="<ol>"; lt="ol"; } out+="<li>"+inl(m[1])+"</li>"; continue; }
+    if(/^\s*-{3,}\s*$/.test(line)){ close(); out+="<hr>"; continue; }
+    close(); out+="<p>"+inl(line)+"</p>";
+  }
   close(); return out;
 }
 function reportTypeLabel(k){ const t=REPORT_TYPES.find(x=>x.key===k); return t?t.label:k; }
@@ -6281,7 +6313,8 @@ function aiSaveClientAdvice(){
 
 /* --- Assistant conversationnel + mémoire apprenante --- */
 function aiSystemPrompt(){
-  let s=aiResolve("_default").sysPrefix+"\n\n=== DONNÉES ACTUELLES DU CABINET ===\n"+buildAIContext();
+  const fmt="\n\n=== MISE EN FORME (impératif) ===\nRéponds en français, ton premium sobre orienté dirigeant. Structure clairement : titres courts (## / ###), listes à puces, et tableaux markdown quand c'est pertinent. La mise en forme est rendue proprement à l'écran — n'ajoute jamais de préambule inutile, va à l'essentiel, sois complet mais concis. Ne t'annonce pas (« HERMÈS : »), ne renvoie jamais vers un autre assistant : traite la demande toi-même.";
+  let s=aiResolve("_default").sysPrefix+fmt+"\n\n=== DONNÉES ACTUELLES DU CABINET ===\n"+buildAIContext();
   const mem=DB.aiMemory||[]; if(mem.length) s+="\n\n=== MÉMOIRE (préférences, faits validés, corrections à respecter) ===\n"+mem.map(m=>"- "+m.text).join("\n");
   const conseils=DB.advice.custom||[]; if(conseils.length) s+="\n\n=== CONSEILS DÉJÀ RETENUS PAR L'UTILISATEUR (aligne ton style dessus) ===\n"+conseils.slice(-8).map(c=>"- "+(c.text||"").slice(0,160)).join("\n");
   s+=knowledgeContext();
@@ -6294,8 +6327,8 @@ function renderAiChat(){
   const el=document.getElementById("ai-msgs"); if(!el) return;
   const msgs=DB.aiChat||[];
   el.innerHTML = msgs.length ? msgs.map(function(m,i){ return m.role==="user"
-    ? '<div class="ai-msg user">'+esc(m.content)+'</div>'
-    : '<div class="ai-msg bot"><div style="white-space:pre-wrap">'+esc(m.content)+'</div><button class="ai-remember" onclick="rememberAiMsg('+i+')">🧠 Retenir dans la mémoire</button></div>'; }).join("")
+    ? '<div class="ai-msg user">'+esc(m.content).replace(/\n/g,"<br>")+'</div>'
+    : '<div class="ai-msg bot"><div class="ai-md">'+mdToHtml(m.content)+'</div><button class="ai-remember" onclick="rememberAiMsg('+i+')">🧠 Retenir dans la mémoire</button></div>'; }).join("")
     : '<div class="ai-empty">👋 Pose-moi une question sur ton cabinet, tes clients ou tes risques.<br>J\'ai accès à tes données et à ma mémoire, et je retiens ce que tu me demandes de retenir (🧠).</div>';
   el.scrollTop=el.scrollHeight;
 }
