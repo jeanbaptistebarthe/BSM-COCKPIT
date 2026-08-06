@@ -5742,10 +5742,12 @@ function a1GenClientPicker(){
 function a1GenExpectedLh(consoTheoLh, chargePct){ if(!(consoTheoLh>0)) return 0; const c=(chargePct>0?chargePct:100)/100; return consoTheoLh*(0.30+0.70*c); }
 function a1GenCompute(clientId){
   const yr=new Date().getFullYear(); const perG={};
-  DB.a1gensets.filter(g=>!clientId||g.clientId===clientId).forEach(g=>{ perG[g.id]={g, hours:0, liters:0, kwh:0, cost:0, chW:0, jkwh:0, jkwhW:0, n:0}; });
+  DB.a1gensets.filter(g=>!clientId||g.clientId===clientId).forEach(g=>{ perG[g.id]={g, hours:0, liters:0, kwh:0, cost:0, chW:0, jkwh:0, jkwhW:0, expL:0, gap:0, n:0}; });
   DB.a1genlogs.forEach(l=>{ const p=perG[l.gensetId]; if(!p) return;
     const h=+l.hours||0; p.hours+=h; p.liters+=(+l.liters||0); p.kwh+=(+l.kwh||0);
     p.cost+=toDefault(+l.cost||0,l.currency||DB.meta.defaultCurrency);
+    if(l.expectedLiters>0){ p.expL+=(+l.expectedLiters); } // conso attendue fournie (ex. tableau de bord importé)
+    if(l.costGap){ p.gap+=toDefault(+l.costGap||0,l.currency||DB.meta.defaultCurrency); } // écart valorisé (Ar)
     if(l.chargePct>0){ p.chW+=(+l.chargePct)*(h||1); } // charge moyenne pondérée par les heures
     if(l.jiramaPrice>0){ p.jkwh+=(+l.jiramaPrice)*((+l.kwh)||1); p.jkwhW+=((+l.kwh)||1); }
     p.n++;
@@ -5754,8 +5756,11 @@ function a1GenCompute(clientId){
     p.chargePct = p.hours>0 && p.chW>0 ? p.chW/p.hours : 0;
     p.realLh = p.hours>0 ? p.liters/p.hours : 0;
     p.consoTheo = +p.g.consoTheoLh||0;
+    p.expLiters = p.expL||0;
     p.expectedLh = a1GenExpectedLh(p.consoTheo, p.chargePct);
-    p.driftLh = p.expectedLh>0 && p.realLh>0 ? (p.realLh/p.expectedLh-1)*100 : null; // dérive vs attendu
+    // Dérive : on privilégie la conso attendue du fichier (reproduit le tableau de bord client) ; sinon modèle constructeur×charge.
+    if(p.expLiters>0 && p.liters>0){ p.driftLh=(p.liters/p.expLiters-1)*100; p.driftBasis="fichier"; }
+    else { p.driftLh = p.expectedLh>0 && p.realLh>0 ? (p.realLh/p.expectedLh-1)*100 : null; p.driftBasis="modele"; }
     p.rendement = p.liters>0 ? p.kwh/p.liters : 0; // kWh par litre
     p.costPerKwh = p.kwh>0 ? p.cost/p.kwh : 0;
     p.costPerHour = p.hours>0 ? p.cost/p.hours : 0;
@@ -5871,42 +5876,99 @@ function openA1GenLogList(gid){
 function deleteA1GenLog(id,gid){ DB.a1genlogs=DB.a1genlogs.filter(x=>x.id!==id); save(); openA1GenLogList(gid); renderA1Genset(); }
 function openA1GenImport(){
   openModal(`<span class="close" onclick="closeModal()">✕</span><h2>Importer des relevés groupes (CSV / Excel)</h2>
-    <div class="msub">Colle les données ou charge un CSV. Colonnes reconnues : <b>groupe, date, heures, litres, kwh, charge, coût, jirama</b> (ordre et accents libres).</div>
-    <div class="field"><label>Coller les lignes (1re ligne = en-têtes)</label><textarea id="gi-csv" rows="7" placeholder="groupe;date;heures;litres;kwh;charge;coût\nGroupe siège;2026-07-01;120;300;1050;70;1500000" style="width:100%;font-family:monospace;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:8px"></textarea></div>
+    <div class="msub">Deux formats reconnus <b>automatiquement</b> : <b>(1)</b> une ligne = un relevé (groupe, date, heures, litres, kwh, charge, coût, jirama) ; <b>(2)</b> un <b>tableau de bord mensuel</b> (plusieurs groupes côte à côte, une ligne par mois, avec « Conso réelle / attendue / Écart »).</div>
+    <div class="field"><label>Coller les lignes (ou charge un fichier)</label><textarea id="gi-csv" rows="7" placeholder="Colle ici le contenu du CSV…" style="width:100%;font-family:monospace;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:8px"></textarea></div>
     <div class="field"><label>… ou fichier CSV</label><input type="file" id="gi-file" accept=".csv,text/csv" onchange="a1GenFileToBox()"></div>
     <div class="field row2"><label>Client & devise des coûts</label>
-      <select id="gi-client"><option value="">— Aucun client —</option>${DB.clients.map(c=>`<option value="${c.id}" ${a1genClient===c.id?'selected':''}>${esc(c.company)}</option>`).join("")}</select>
+      <select id="gi-client"><option value="">— Aucun client (usage interne BSM) —</option>${DB.clients.map(c=>`<option value="${c.id}" ${a1genClient===c.id?'selected':''}>${esc(c.company)}</option>`).join("")}</select>
       <select id="gi-cur">${curOptions(DB.meta.defaultCurrency)}</select></div>
+    <div class="field"><label>Prix du carburant (par litre) — optionnel, pour calculer le coût du kWh</label><input type="number" step="0.01" id="gi-price" placeholder="Ex : 5000"></div>
+    <div class="field"><label style="display:flex;align-items:center;gap:8px;font-weight:600;color:var(--ink)"><input type="checkbox" id="gi-replace"> Remplacer les groupes existants de ce périmètre (repart propre après un import raté)</label></div>
+    <div class="hint">Si un import précédent a créé des groupes incohérents (noms de mois, « TOTAL »…), coche « Remplacer » pour nettoyer avant de réimporter.</div>
     <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="runA1GenImport()">Importer</button></div>`);
 }
 function a1GenFileToBox(){ const f=document.getElementById("gi-file").files[0]; if(!f) return; const r=new FileReader(); r.onload=e=>{ document.getElementById("gi-csv").value=e.target.result; }; r.readAsText(f); }
-function a1GenParseCSV(text){
-  const lines=String(text||"").trim().split(/\r?\n/).filter(l=>l.trim()); if(lines.length<2) return [];
-  const sep=(lines[0].split(";").length>lines[0].split(",").length)?";":(lines[0].indexOf("\t")>=0?"\t":",");
-  const head=lines[0].split(sep).map(h=>h.trim().toLowerCase());
-  const idx=names=>{ for(const n of names){ const i=head.findIndex(h=>h.indexOf(n)>=0); if(i>=0) return i; } return -1; };
-  const iG=idx(["groupe","group","genset","machine","nom"]), iDate=idx(["date"]), iH=idx(["heure","hours","h"]), iL=idx(["litre","carburant","gasoil","fuel","conso"]),
-        iK=idx(["kwh","energie","énergie","kw"]), iC=idx(["charge","load","%"]), iCost=idx(["coût","cout","cost","montant","prix"]), iJ=idx(["jirama","reseau","réseau","tarif"]);
-  const num=s=>parseFloat(String(s==null?"":s).replace(/\s/g,"").replace(/[^\d.,-]/g,"").replace(",","."))||0;
-  const out=[];
-  for(let r=1;r<lines.length;r++){ const c=lines[r].split(sep); if(!c.length) continue;
-    out.push({ gen:(iG>=0?c[iG]:"").trim(), date:(iDate>=0?c[iDate]:"").trim()||todayISO(), hours:num(iH>=0?c[iH]:0), liters:num(iL>=0?c[iL]:0), kwh:num(iK>=0?c[iK]:0), chargePct:num(iC>=0?c[iC]:0), cost:num(iCost>=0?c[iCost]:0), jiramaPrice:num(iJ>=0?c[iJ]:0) }); }
-  return out.filter(r=>r.gen);
+/* --- Parsing CSV robuste (guillemets, séparateur auto, nombres français, mois FR) --- */
+function a1csvSplit(line, sep){ const out=[]; let cur="", q=false;
+  for(let i=0;i<line.length;i++){ const ch=line[i];
+    if(q){ if(ch==='"'){ if(line[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=ch; }
+    else { if(ch==='"') q=true; else if(ch===sep){ out.push(cur); cur=""; } else cur+=ch; } }
+  out.push(cur); return out; }
+function a1csvSep(line){ const c=(line.match(/,/g)||[]).length, s=(line.match(/;/g)||[]).length, t=(line.match(/\t/g)||[]).length; if(t>=1&&t>=c&&t>=s) return "\t"; return s>c?";":","; }
+function a1csvRows(text){ const lines=String(text||"").replace(/\r\n?/g,"\n").split("\n"); let sep=","; for(const l of lines){ if(l.trim()){ sep=a1csvSep(l); break; } }
+  return lines.filter(l=>l.length>0).map(l=>a1csvSplit(l,sep).map(c=>c.trim())); }
+function a1frNum(s){ s=String(s==null?"":s).trim(); if(!s) return 0; s=s.replace(/\s/g,"").replace(/[^\d.,-]/g,""); if(s.indexOf(",")>=0){ s=s.replace(/\./g,"").replace(",","."); } const n=parseFloat(s); return isNaN(n)?0:n; }
+var A1_FR_MONTHS={janvier:1,fevrier:2,mars:3,avril:4,mai:5,juin:6,juillet:7,aout:8,septembre:9,octobre:10,novembre:11,decembre:12};
+function a1FrMonthISO(s){ const t=norm(s); const m=t.match(/([a-z]+)\.?\s+(\d{4})/); if(m && A1_FR_MONTHS[m[1]]) return m[2]+"-"+String(A1_FR_MONTHS[m[1]]).padStart(2,"0")+"-01"; return ""; }
+function a1DateISO(s){ s=String(s||"").trim(); if(!s) return todayISO(); const mo=a1FrMonthISO(s); if(mo) return mo;
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0,10);
+  const m=s.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})/); if(m){ let y=m[3].length===2?"20"+m[3]:m[3]; return y+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0"); }
+  return todayISO(); }
+/* Analyse le contenu : renvoie {gensets:[{name,logs:[…]}], mode}. Reconnaît le format simple ET le tableau de bord mensuel. */
+function a1GenImportParse(text){
+  const rows=a1csvRows(text); if(rows.length<2) return {gensets:[], mode:"vide"};
+  let hdr=-1;
+  for(let i=0;i<Math.min(rows.length,12);i++){ const c=rows[i].map(norm);
+    const key=c.some(x=>x.includes("mois")||x.includes("periode")||x==="date"||x.includes("groupe")||x.includes("machine"));
+    const metric=c.some(x=>x.includes("heure")||x.includes("kwh")||x.includes("conso")||x.includes("litre"));
+    if(key&&metric){ hdr=i; break; } }
+  if(hdr<0) return {gensets:[], mode:"inconnu"};
+  const H=rows[hdr].map(norm);
+  const simple = H.some(x=>x.includes("groupe")||x.includes("machine")||x.includes("genset"));
+  if(simple){
+    const idx=names=>{ for(const n of names){ const i=H.findIndex(h=>h.includes(n)); if(i>=0) return i; } return -1; };
+    const iG=idx(["groupe","machine","genset","nom"]), iDate=idx(["date","mois","periode"]), iH=idx(["heure"]),
+          iL=idx(["conso","litre","carburant","gasoil","fuel"]), iK=idx(["kwh","energie"]), iC=idx(["charge","load"]),
+          iCost=idx(["cout","cost","montant","prix"]), iJ=idx(["jirama","reseau","tarif"]);
+    const map={};
+    for(let r=hdr+1;r<rows.length;r++){ const c=rows[r]; const name=(iG>=0?(c[iG]||""):"").trim(); if(!name||/^total/i.test(name)) continue;
+      const g=map[name]||(map[name]={name, logs:[]});
+      g.logs.push({ date:a1DateISO(iDate>=0?c[iDate]:""), hours:a1frNum(c[iH]), liters:a1frNum(c[iL]), kwh:a1frNum(c[iK]), chargePct:a1frNum(c[iC]), cost:a1frNum(c[iCost]), jiramaPrice:a1frNum(c[iJ]) }); }
+    return {gensets:Object.values(map), mode:"simple"};
+  }
+  // Format tableau de bord mensuel : blocs de générateurs côte à côte, une ligne = un mois.
+  const blockRow = hdr>0 ? rows[hdr-1] : [];
+  const starts=[]; for(let cI=0;cI<blockRow.length;cI++){ if((blockRow[cI]||"").trim()) starts.push(cI); }
+  const blocks=[];
+  for(let s=0;s<starts.length;s++){ const start=starts[s], end=(s+1<starts.length?starts[s+1]:H.length);
+    const find=(k1,k2)=>{ for(let j=start;j<end;j++){ const h=H[j]||""; if(h.includes(k1)&&(!k2||h.includes(k2))) return j; } return -1; };
+    const iH=find("heure"), iK=find("kwh"), iL=find("conso","reel"), iExp=find("conso","attendu");
+    let iEc=-1; for(let j=start;j<end;j++){ const h=H[j]||""; if(h.includes("ecart")&&/\(ar|ar\)|ariary/.test(h)){ iEc=j; break; } } // écart valorisé (Ar), pas l'écart en litres
+    if(iL>=0 && iH>=0) blocks.push({ name:(blockRow[start]||"Groupe").trim(), iH, iK, iL, iExp, iEc }); // bloc = groupe si conso réelle + heures
+  }
+  if(!blocks.length) return {gensets:[], mode:"matrice-vide"};
+  const gensets=blocks.map(b=>({name:b.name, logs:[]}));
+  for(let r=hdr+1;r<rows.length;r++){ const c=rows[r]; const period=(c[0]||"").trim();
+    if(!period||/^total/i.test(period)) continue; const iso=a1FrMonthISO(period); if(!iso) continue;
+    blocks.forEach((b,bi)=>{ const hours=a1frNum(c[b.iH]), liters=a1frNum(c[b.iL]), kwh=a1frNum(b.iK>=0?c[b.iK]:0);
+      if(!hours && !liters && !kwh) return;
+      gensets[bi].logs.push({ date:iso, hours, liters, kwh, expectedLiters:a1frNum(b.iExp>=0?c[b.iExp]:0), costGap:a1frNum(b.iEc>=0?c[b.iEc]:0), chargePct:0, cost:0, jiramaPrice:0 }); });
+  }
+  return {gensets:gensets.filter(g=>g.logs.length), mode:"matrice"};
 }
 function runA1GenImport(){
-  const rows=a1GenParseCSV(val("gi-csv")); const cur=val("gi-cur")||DB.meta.defaultCurrency; const cid=val("gi-client")||"";
-  if(!rows.length){ toast("Aucune ligne exploitable (vérifie l'en-tête)."); return; }
+  const res=a1GenImportParse(val("gi-csv"));
+  const cur=val("gi-cur")||DB.meta.defaultCurrency, cid=val("gi-client")||"";
+  const price=parseFloat((val("gi-price")||"").replace(",","."))||0;
+  const replace=document.getElementById("gi-replace") && document.getElementById("gi-replace").checked;
+  if(!res.gensets.length){ toast("Fichier non reconnu — il faut une colonne mois/groupe + des colonnes heures/kWh/conso."); return; }
+  if(replace){ const inScope = cid? (g=>g.clientId===cid) : (g=>!g.clientId);
+    const ids=DB.a1gensets.filter(inScope).map(g=>g.id);
+    DB.a1gensets=DB.a1gensets.filter(g=>!inScope(g));
+    DB.a1genlogs=DB.a1genlogs.filter(l=>ids.indexOf(l.gensetId)<0); }
   let ng=0, nl=0;
-  rows.forEach(r=>{ let g=DB.a1gensets.find(x=>x.name.toLowerCase()===r.gen.toLowerCase() && (!cid || x.clientId===cid));
-    if(!g){ g={id:uid(),name:r.gen,carburant:"Diesel",clientId:cid}; DB.a1gensets.push(g); ng++; }
-    DB.a1genlogs.push({id:uid(),gensetId:g.id,date:r.date,hours:r.hours,liters:r.liters,kwh:r.kwh,chargePct:r.chargePct,cost:r.cost,currency:cur,jiramaPrice:r.jiramaPrice}); nl++;
-  });
-  save(); closeModal(); renderA1Genset(); toast(nl+" relevé(s) importé(s), "+ng+" groupe(s) créé(s).");
+  res.gensets.forEach(gs=>{ let g=DB.a1gensets.find(x=>norm(x.name)===norm(gs.name) && (!cid || x.clientId===cid));
+    if(!g){ g={id:uid(), name:gs.name, carburant:"Diesel", clientId:cid}; DB.a1gensets.push(g); ng++; }
+    gs.logs.forEach(l=>{ const liters=+l.liters||0; const cost=l.cost>0?l.cost:(price>0?liters*price:0);
+      DB.a1genlogs.push({ id:uid(), gensetId:g.id, date:l.date, hours:+l.hours||0, liters, kwh:+l.kwh||0, chargePct:+l.chargePct||0,
+        expectedLiters:+l.expectedLiters||0, costGap:+l.costGap||0, cost, currency:cur, jiramaPrice:+l.jiramaPrice||0 }); nl++; }); });
+  save(); closeModal(); renderA1Genset();
+  toast(nl+" relevé(s) importé(s), "+ng+" groupe(s)"+(res.mode==="matrice"?" — format tableau de bord mensuel ✅":"")+".");
 }
 function buildGensetContext(){
   const {arr, totals}=a1GenCompute(a1genClient);
   let t=`Analyse de groupes électrogènes (méthode BSM, Madagascar — contexte délestages JIRAMA). Devise ${DB.meta.defaultCurrency}. Total ${Math.round(totals.hours)} h, ${Math.round(totals.liters)} L, ${Math.round(totals.kwh)} kWh, coût carburant ${fmtD(totals.cost)}. Rendement moyen ${totals.rendement?totals.rendement.toFixed(2):"?"} kWh/L, coût ${fmtD(totals.costPerKwh)}/kWh${totals.jiramaKwh?`, tarif réseau JIRAMA ${fmtD(totals.jiramaKwh)}/kWh (équivalent réseau ${fmtD(totals.jiramaEquiv)})`:""}.\nGroupes :\n`;
-  arr.forEach(p=>{ t+=`- ${p.g.name} (${[p.g.puissanceKva?p.g.puissanceKva+" kVA":"",p.g.carburant,p.age!=null?p.age+" ans":""].filter(Boolean).join(", ")||"?"}) : ${Math.round(p.hours)} h, ${Math.round(p.liters)} L, ${Math.round(p.kwh)} kWh, conso réelle ${p.realLh?p.realLh.toFixed(1):"?"} L/h${p.consoTheo?` (constructeur ${p.consoTheo} L/h à pleine charge ; attendu ${p.expectedLh.toFixed(1)} à ${p.chargePct?p.chargePct.toFixed(0)+"% de charge":"charge inconnue"} → dérive ${p.driftLh!=null?(p.driftLh>0?"+":"")+p.driftLh.toFixed(0)+"%":"?"})`:""}, rendement ${p.rendement?p.rendement.toFixed(2):"?"} kWh/L, ${fmtD(p.costPerKwh)}/kWh${p.vsJirama!=null?` (${p.vsJirama>0?"+":""}${fmtD(p.vsJirama)}/kWh vs réseau)`:""}${p.anomaly?" [SURCONSOMMATION]":""}${p.lowLoad?" [SOUS-CHARGE]":""}.\n`; });
+  arr.forEach(p=>{ t+=`- ${p.g.name} (${[p.g.puissanceKva?p.g.puissanceKva+" kVA":"",p.g.carburant,p.age!=null?p.age+" ans":""].filter(Boolean).join(", ")||"?"}) : ${Math.round(p.hours)} h, ${Math.round(p.liters)} L, ${Math.round(p.kwh)} kWh, conso réelle ${p.realLh?p.realLh.toFixed(1):"?"} L/h${p.expLiters>0?` (conso attendue ${Math.round(p.expLiters)} L selon tableau de bord → dérive ${p.driftLh!=null?(p.driftLh>0?"+":"")+p.driftLh.toFixed(0)+"%":"?"}${p.gap?", écart valorisé "+fmtD(p.gap):""})`:(p.consoTheo?` (constructeur ${p.consoTheo} L/h à pleine charge ; attendu ${p.expectedLh.toFixed(1)} à ${p.chargePct?p.chargePct.toFixed(0)+"% de charge":"charge inconnue"} → dérive ${p.driftLh!=null?(p.driftLh>0?"+":"")+p.driftLh.toFixed(0)+"%":"?"})`:"")}, rendement ${p.rendement?p.rendement.toFixed(2):"?"} kWh/L, ${fmtD(p.costPerKwh)}/kWh${p.vsJirama!=null?` (${p.vsJirama>0?"+":""}${fmtD(p.vsJirama)}/kWh vs réseau)`:""}${p.anomaly?" [SURCONSOMMATION]":""}${p.lowLoad?" [SOUS-CHARGE]":""}.\n`; });
   t+="\nIdentifie : surconsommations (entretien, injecteurs, filtres, ou détournement de carburant), groupes en sous-charge (surdimensionnés → rendement et durée de vie dégradés), rendement anormalement bas, et l'arbitrage coût groupe vs réseau JIRAMA. Donne des recommandations concrètes, chiffrées et hiérarchisées, en tenant compte des délestages.";
   return t.slice(0,6500);
 }
