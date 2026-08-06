@@ -382,6 +382,7 @@
     <div class="screen" id="scr-rh"></div>
     <div class="screen" id="scr-audit"></div>
     <div class="screen" id="scr-a1fleet"></div>
+    <div class="screen" id="scr-a1genset"></div>
     <div class="screen" id="scr-commercial"></div>
     <div class="screen" id="scr-documentation"></div>
     <div class="screen" id="scr-fiches"></div>
@@ -502,7 +503,7 @@ function defaultDB(){
     missions:[], risks:[], recommendations:[],
     employees:[], recruitments:[], leaves:[], activities:[], documents:[], playbooks:[], aiMemory:[], aiChat:[],
     users:[], activityLog:[], notifications:[], moneyRequests:[], investments:[], decisions:[],
-    a1vehicles:[], a1logs:[], a1offers:[],
+    a1vehicles:[], a1logs:[], a1gensets:[], a1genlogs:[], a1offers:[],
     advice:{ dismissed:[], edits:{}, custom:[], readIds:[] }
   };
 }
@@ -531,7 +532,8 @@ function load(){
   DB.playbooks=DB.playbooks||[]; DB.aiMemory=DB.aiMemory||[]; DB.aiChat=DB.aiChat||[];
   DB.recurring=DB.recurring||[]; DB.jobs=DB.jobs||[]; DB.primes=DB.primes||[]; DB.devis=DB.devis||[];
   DB.users=DB.users||[]; DB.activityLog=DB.activityLog||[]; DB.notifications=DB.notifications||[]; DB.moneyRequests=DB.moneyRequests||[]; DB.investments=DB.investments||[]; DB.decisions=DB.decisions||[];
-  DB.a1vehicles=DB.a1vehicles||[]; DB.a1logs=DB.a1logs||[]; DB.a1offers=DB.a1offers||[];
+  DB.a1vehicles=DB.a1vehicles||[]; DB.a1logs=DB.a1logs||[]; DB.a1gensets=DB.a1gensets||[]; DB.a1genlogs=DB.a1genlogs||[]; DB.a1offers=DB.a1offers||[];
+  DB.a1offers.forEach(o=>{ if(!o.product) o.product="flotte"; }); // migration : offres existantes = programme flotte
   DB.docTemplates=DB.docTemplates||[]; DB.clientDocs=DB.clientDocs||[]; DB.aiUsage=DB.aiUsage||[];
   DB.assistants=DB.assistants||[]; DB.aiSettings=DB.aiSettings||[]; DB.reports=DB.reports||[]; DB.knowledge=DB.knowledge||[];
   if(!DB.meta.assistantsSeeded){ if(!DB.assistants.length){ DB.assistants=defaultAssistants(); DB.aiSettings=[{ id:"main", basePrompt:defaultAiBasePrompt(), routing:defaultAiRouting() }]; } DB.meta.assistantsSeeded=true; }
@@ -645,7 +647,7 @@ function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(DB)); serverPush
    La clé "publishable" est PUBLIQUE par nature — l'accès aux données est verrouillé par la RLS (isolation par organisation). */
 const SB_URL = "https://fxaeeplylyeitukctlph.supabase.co";
 const SB_KEY = "sb_publishable_SrXvreUFVJgLLBi6PLvA-g_ARBg2SST";
-const CLOUD_COLLECTIONS = ["clients","events","transactions","missions","risks","recommendations","employees","recruitments","leaves","activities","documents","playbooks","recurring","jobs","primes","devis","moneyRequests","investments","decisions","a1vehicles","a1logs","a1offers","docTemplates","clientDocs","aiUsage","assistants","aiSettings","reports","knowledge"];
+const CLOUD_COLLECTIONS = ["clients","events","transactions","missions","risks","recommendations","employees","recruitments","leaves","activities","documents","playbooks","recurring","jobs","primes","devis","moneyRequests","investments","decisions","a1vehicles","a1logs","a1gensets","a1genlogs","a1offers","docTemplates","clientDocs","aiUsage","assistants","aiSettings","reports","knowledge"];
 let _sb=null, cloudOrgId=null, cloudPrimary=false, _cloudTimer=null;
 /* Snapshot des identifiants déjà poussés PAR CE POSTE, par collection.
    Sert à propager les suppressions SANS jamais effacer ce qu'un AUTRE poste aurait ajouté
@@ -1157,7 +1159,7 @@ function setScreen(name){
 function renderScreen(name){
   ({dashboard:renderDashboard, clients:renderClients, agenda:renderAgenda,
     budget:renderBudget, ca:renderCA, resultat:renderResultat, roi:renderROI, aireport:renderAireport, aiassist:renderAiassist, reports:renderReports, monitoring:renderMonitoring, missions:renderMissions, risks:renderRisks,
-    carto:renderCarto, recos:renderRecos, rh:renderRH, audit:renderAudit, "a1fleet":renderA1Fleet,
+    carto:renderCarto, recos:renderRecos, rh:renderRH, audit:renderAudit, "a1fleet":renderA1Fleet, "a1genset":renderA1Genset,
     commercial:renderCommercial, documentation:renderDocumentation, fiches:renderFiches, glossaire:renderGlossaire, clientfiche:renderClientFiche, analyses:renderAnalyses,
     "admin-users":renderAdminUsers, "admin-log":renderAdminLog}[name]||(()=>{}))();
 }
@@ -5323,7 +5325,7 @@ function renderAudit(){
       <div><h2 style="margin:0">🧮 Programmes d'analyse A1</h2><div class="msub" style="margin:2px 0 6px">Analyse de données opérationnelles à valeur ajoutée — prestation vendable au client (calcul + IA + conseils + rapport).</div></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button class="cta" onclick="setScreen('a1fleet')">🚗 Flotte & carburant + GPS →</button>
-        <button class="cta ghost" disabled title="Prochain module">🔌 Groupes électrogènes / JIRAMA — bientôt</button>
+        <button class="cta" onclick="setScreen('a1genset')">🔌 Groupes électrogènes / JIRAMA →</button>
       </div>
     </div>
     ${url? `<div class="card">
@@ -5377,6 +5379,8 @@ function saveAuditConfig(){
 
 /* ===================== PROGRAMME A1 — Flotte & carburant + GPS ===================== */
 const A1_VEH_TYPES=["Moto","Voiture / VHL","Camion","Utilitaire","Bus / Car","Engin","Autre"];
+const A1_MOTORISATIONS=["Diesel","Essence","Hybride","GPL","Électrique","Autre"];
+const A1_USAGES=["Urbain","Route / interurbain","Mixte","Chantier / tout-terrain","Livraison / distribution"];
 let a1Client=""; // "" = tous les clients
 function a1VehName(id){ const v=DB.a1vehicles.find(x=>x.id===id); return v?v.name:"—"; }
 function a1VehClientName(v){ return v.clientId?clientName(v.clientId):(v.client||""); }
@@ -5389,10 +5393,19 @@ function a1Compute(clientId){
   const perV={};
   DB.a1vehicles.filter(v=>!clientId||v.clientId===clientId).forEach(v=>{ perV[v.id]={v, km:0, liters:0, cost:0, hours:0, idle:0, n:0}; });
   DB.a1logs.forEach(l=>{ const p=perV[l.vehicleId]; if(!p) return; p.km+=(+l.km||0); p.liters+=(+l.liters||0); p.cost+=toDefault(+l.cost||0,l.currency||DB.meta.defaultCurrency); p.hours+=(+l.hours||0); p.idle+=(+l.idle||0); p.n++; });
-  const arr=Object.values(perV).map(p=>{ p.consoL100=p.km>0?p.liters/p.km*100:0; p.costPerKm=p.km>0?p.cost/p.km:0; p.costPerL=p.liters>0?p.cost/p.liters:0; return p; });
+  const yr=new Date().getFullYear();
+  const arr=Object.values(perV).map(p=>{ p.consoL100=p.km>0?p.liters/p.km*100:0; p.costPerKm=p.km>0?p.cost/p.km:0; p.costPerL=p.liters>0?p.cost/p.liters:0;
+    // Données machine (constructeur) → dérive vs réel, âge, ratio ralenti
+    p.consoTheo=+p.v.consoTheo||0;
+    p.driftTheo=(p.consoTheo>0&&p.consoL100>0)?(p.consoL100/p.consoTheo-1)*100:null; // % au-dessus/sous conso constructeur
+    p.age=p.v.annee?Math.max(0,yr-(+p.v.annee)):null;
+    p.idleRatio=p.hours>0?p.idle/p.hours*100:0;
+    return p; });
   const withKm=arr.filter(p=>p.km>0);
   const fleetConso=withKm.length? withKm.reduce((s,p)=>s+p.consoL100,0)/withKm.length : 0;
-  arr.forEach(p=>{ p.anomaly = p.km>0 && fleetConso>0 && p.consoL100 > fleetConso*1.2; });
+  // Anomalie = surconso vs constructeur (>15%) OU, à défaut de donnée constructeur, vs moyenne flotte (>20%)
+  arr.forEach(p=>{ p.anomaly = p.km>0 && ( (p.consoTheo>0 && p.consoL100 > p.consoTheo*1.15) || (p.consoTheo<=0 && fleetConso>0 && p.consoL100 > fleetConso*1.2) );
+    p.idleFlag = p.idleRatio>35; }); // ralenti excessif (>35% du temps moteur)
   const totals={ km:arr.reduce((s,p)=>s+p.km,0), liters:arr.reduce((s,p)=>s+p.liters,0), cost:arr.reduce((s,p)=>s+p.cost,0) };
   totals.consoL100 = totals.km>0? totals.liters/totals.km*100:0;
   totals.costPerKm = totals.km>0? totals.cost/totals.km:0;
@@ -5408,7 +5421,7 @@ function renderA1Fleet(){
       <td><b>${esc(p.v.name)}</b><div style="font-size:11px;color:var(--muted)">${esc(p.v.type||"")}${p.v.plate?" · "+esc(p.v.plate):""}${a1VehClientName(p.v)?" · "+esc(a1VehClientName(p.v)):""}</div></td>
       <td style="text-align:right">${p.km.toLocaleString('fr-FR')} km</td>
       <td style="text-align:right">${Math.round(p.liters).toLocaleString('fr-FR')} L</td>
-      <td style="text-align:right;font-weight:600;${p.anomaly?'color:var(--red)':''}">${p.consoL100?p.consoL100.toFixed(1)+" L/100":"—"}${p.anomaly?' ⚠️':''}</td>
+      <td style="text-align:right;font-weight:600;${p.anomaly?'color:var(--red)':''}">${p.consoL100?p.consoL100.toFixed(1)+" L/100":"—"}${p.anomaly?' ⚠️':''}${p.driftTheo!=null?`<div style="font-size:10px;font-weight:400;color:${p.driftTheo>15?'var(--red)':p.driftTheo>0?'var(--amber)':'var(--green)'}">vs constr. ${p.driftTheo>0?'+':''}${p.driftTheo.toFixed(0)}%</div>`:""}</td>
       <td style="text-align:right">${p.costPerKm?fmtD(p.costPerKm):"—"}</td>
       <td style="text-align:right">${fmtD(p.cost)}</td>
       <td><div class="rowact"><button class="iconbtn" title="Relevés" onclick="openA1LogList('${p.v.id}')">📄</button><button class="iconbtn" onclick="openA1Vehicle('${p.v.id}')">✎</button><button class="iconbtn del" onclick="deleteA1Vehicle('${p.v.id}')">🗑</button></div></td>
@@ -5423,7 +5436,7 @@ function renderA1Fleet(){
         <button class="cta gold" onclick="a1Analyze()">🤖 Analyse IA</button>
         <button class="cta ghost" onclick="printA1Report()">🖨 Rapport</button></div></div>
     <div class="filters">${a1ClientPicker()}<span style="font-size:12px;color:var(--muted)">${a1Client?"Données de "+esc(clientName(a1Client)):"Vue toutes flottes confondues"}</span></div>
-    ${a1Client?a1OfferCard(a1Client):`<div class="infobox">Sélectionne un <b>client</b> ci-dessus pour gérer ses données séparément et lui associer une <b>offre programme</b> (forfait + tarif, période offerte).</div>`}
+    ${a1Client?a1OfferCard(a1Client,"flotte"):`<div class="infobox">Sélectionne un <b>client</b> ci-dessus pour gérer ses données séparément et lui associer une <b>offre programme</b> (forfait + tarif, période offerte).</div>`}
     <div class="kpis">
       <div class="kpi"><div class="v">${totals.km.toLocaleString('fr-FR')}</div><div class="l">km parcourus</div></div>
       <div class="kpi"><div class="v">${totals.consoL100?totals.consoL100.toFixed(1):"—"}</div><div class="l">Conso moyenne (L/100)</div></div>
@@ -5447,12 +5460,26 @@ function openA1Vehicle(id){
     <div class="field row2"><label>Type & immatriculation</label>
       <select id="v-type">${A1_VEH_TYPES.map(t=>`<option ${v.type===t?'selected':''}>${t}</option>`).join("")}</select>
       <input id="v-plate" value="${esc(v.plate||'')}" placeholder="Immat."></div>
+    <div class="field row2"><label>Marque & modèle</label>
+      <input id="v-marque" value="${esc(v.marque||'')}" placeholder="Ex : Hino"><input id="v-modele" value="${esc(v.modele||'')}" placeholder="Ex : 300 Series"></div>
+    <div class="field row2"><label>Année de mise en service & motorisation</label>
+      <input type="number" id="v-annee" value="${v.annee!=null?v.annee:''}" placeholder="Ex : 2019"><select id="v-motor">${A1_MOTORISATIONS.map(t=>`<option ${v.motorisation===t?'selected':''}>${t}</option>`).join("")}</select></div>
+    <div class="field row2"><label>Puissance (ch) & capacité réservoir (L)</label>
+      <input type="number" id="v-puissance" value="${v.puissance!=null?v.puissance:''}" placeholder="ch"><input type="number" id="v-reservoir" value="${v.reservoir!=null?v.reservoir:''}" placeholder="litres"></div>
+    <div class="field row2"><label>Conso constructeur (L/100) & usage</label>
+      <input type="number" step="0.1" id="v-consotheo" value="${v.consoTheo!=null?v.consoTheo:''}" placeholder="Ex : 9.5"><select id="v-usage"><option value="">— Usage —</option>${A1_USAGES.map(t=>`<option ${v.usage===t?'selected':''}>${t}</option>`).join("")}</select></div>
+    <div class="field row2"><label>Compteur actuel (km) & périodicité entretien (km)</label>
+      <input type="number" id="v-kmactuel" value="${v.kmActuel!=null?v.kmActuel:''}" placeholder="km au compteur"><input type="number" id="v-entretien" value="${v.entretienKm!=null?v.entretienKm:''}" placeholder="Ex : 10000"></div>
     <div class="field"><label>Client (cockpit)</label><select id="v-client"><option value="">— Aucun —</option>${DB.clients.map(c=>`<option value="${c.id}" ${v.clientId===c.id?'selected':''}>${esc(c.company)}</option>`).join("")}</select></div>
+    <div class="hint">La <b>conso constructeur</b> sert de référence : le Cockpit calcule l'écart (dérive %) entre la conso réelle mesurée et cette valeur → détection fine des surconsommations, entretien à prévoir, vol de carburant.</div>
     <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="saveA1Vehicle('${id||''}')">Enregistrer</button></div>`);
 }
 function saveA1Vehicle(id){
   const name=(val("v-name")||"").trim(); if(!name){ toast("Nom obligatoire."); return; }
-  const obj={name, type:val("v-type"), plate:val("v-plate"), clientId:val("v-client")};
+  const obj={name, type:val("v-type"), plate:val("v-plate"), marque:val("v-marque"), modele:val("v-modele"),
+    annee:parseInt(val("v-annee"))||"", motorisation:val("v-motor"), puissance:parseFloat(val("v-puissance"))||"",
+    reservoir:parseFloat(val("v-reservoir"))||"", consoTheo:parseFloat(val("v-consotheo"))||"", usage:val("v-usage"),
+    kmActuel:parseFloat(val("v-kmactuel"))||"", entretienKm:parseFloat(val("v-entretien"))||"", clientId:val("v-client")};
   if(id){ Object.assign(DB.a1vehicles.find(x=>x.id===id),obj); } else { obj.id=uid(); DB.a1vehicles.push(obj); }
   save(); closeModal(); renderA1Fleet(); toast("Véhicule enregistré.");
 }
@@ -5527,8 +5554,9 @@ function runA1Import(){
 function buildA1Context(){
   const {arr, fleetConso, totals}=a1Compute();
   let t=`Analyse de flotte (méthode BSM). Devise ${DB.meta.defaultCurrency}. Conso moyenne flotte ${fleetConso.toFixed(1)} L/100 km. Total ${totals.km.toLocaleString('fr-FR')} km, ${Math.round(totals.liters)} L, coût carburant ${fmtD(totals.cost)}, coût moyen ${fmtD(totals.costPerKm)}/km.\nVéhicules :\n`;
-  arr.forEach(p=>{ t+=`- ${p.v.name} (${p.v.type||"?"}${p.v.client?", client "+p.v.client:""}) : ${p.km.toLocaleString('fr-FR')} km, ${Math.round(p.liters)} L, conso ${p.consoL100?p.consoL100.toFixed(1):"?"} L/100, ${fmtD(p.costPerKm)}/km${p.hours?`, ${Math.round(p.hours)} h moteur`:""}${p.idle?`, ${Math.round(p.idle)} h ralenti`:""}${p.anomaly?" [SURCONSOMMATION]":""}.\n`; });
-  return t.slice(0,6000);
+  arr.forEach(p=>{ t+=`- ${p.v.name} (${[p.v.type,p.v.marque,p.v.modele].filter(Boolean).join(" ")||"?"}${p.v.motorisation?", "+p.v.motorisation:""}${p.age!=null?", "+p.age+" ans":""}${p.v.usage?", usage "+p.v.usage:""}) : ${p.km.toLocaleString('fr-FR')} km, ${Math.round(p.liters)} L, conso réelle ${p.consoL100?p.consoL100.toFixed(1):"?"} L/100${p.consoTheo?` (constructeur ${p.consoTheo} → dérive ${p.driftTheo>0?"+":""}${p.driftTheo!=null?p.driftTheo.toFixed(0):"?"}%)`:""}, ${fmtD(p.costPerKm)}/km${p.hours?`, ${Math.round(p.hours)} h moteur`:""}${p.idle?`, ${Math.round(p.idle)} h ralenti (${p.idleRatio.toFixed(0)}%)`:""}${p.anomaly?" [SURCONSOMMATION]":""}${p.idleFlag?" [RALENTI EXCESSIF]":""}.\n`; });
+  t+="\nInterprète les DÉRIVES vs conso constructeur (un écart positif fort = usure moteur, sous-gonflage, conduite, ou détournement de carburant) et le ralenti excessif. Distingue une dérive explicable par l'âge/l'usage d'une anomalie à investiguer.";
+  return t.slice(0,6500);
 }
 async function a1Analyze(){
   if(!DB.a1logs.length){ toast("Ajoutez ou importez des données d'abord."); return; }
@@ -5552,19 +5580,32 @@ function printA1Report(){
   </div>`;
   window.print();
 }
-/* ---- Offre programme A1 par client (forfait + tarif récurrent + période offerte) ---- */
-function a1Offer(clientId){ return (DB.a1offers||[]).find(o=>o.clientId===clientId); }
+/* ---- Offre commerciale A1 par client & par produit (flotte / groupes élec) — éditable, PDF, mail ---- */
+const A1_PRODUCTS={
+  flotte:{label:"Programme A1 — Flotte & carburant", icon:"🚗",
+    pitch:"Suivi et optimisation de la consommation de carburant de votre flotte : relevés terrain, détection des surconsommations et des dérives par rapport aux données constructeur, analyse par intelligence artificielle et recommandations chiffrées.",
+    scope:"• Collecte et structuration des relevés (carburant, kilométrage, données GPS)\n• Tableau de bord : consommation, coût au km, dérive vs conso constructeur\n• Détection des surconsommations, du ralenti excessif et des anomalies (IA)\n• Rapport mensuel avec recommandations chiffrées et hiérarchisées\n• Point de suivi trimestriel avec la direction"},
+  genset:{label:"Programme A1 — Groupes électrogènes & énergie", icon:"🔌",
+    pitch:"Suivi de vos groupes électrogènes : rendement (kWh/L), coût réel du kWh produit comparé au réseau JIRAMA, détection des dérives et des anomalies, analyse par intelligence artificielle et plan d'optimisation énergétique.",
+    scope:"• Inventaire et caractérisation des groupes (puissance, âge, conso constructeur)\n• Suivi de la consommation (L/h), du rendement (kWh/L) et du taux de charge\n• Comparatif du coût du kWh produit vs tarif réseau JIRAMA\n• Détection des dérives, sous-charges et anomalies (IA)\n• Rapport d'optimisation énergétique avec recommandations chiffrées"}
+};
+function a1ProductDef(p){ return A1_PRODUCTS[p||"flotte"]||A1_PRODUCTS.flotte; }
+function a1Offer(clientId, product){ product=product||"flotte"; return (DB.a1offers||[]).find(o=>o.clientId===clientId && (o.product||"flotte")===product); }
 function a1MonthStartAfter(dstr){ const p=(dstr||todayISO()).split("-"); let y=+p[0], m=+p[1]; m++; if(m>12){ m=1; y++; } return y+"-"+String(m).padStart(2,"0")+"-01"; }
 function a1OfferBillingStart(o){ return (o.offert && o.offertEnd) ? a1MonthStartAfter(o.offertEnd) : (o.offertStart||(todayISO().slice(0,7)+"-01")); }
-function a1OfferCard(clientId){
-  const o=a1Offer(clientId);
-  if(!o) return `<div class="card" style="border-left:3px solid var(--gold)"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div><h2 style="margin:0">💼 Offre programme A1</h2><div class="msub" style="margin:2px 0 0">Associe une offre à ${esc(clientName(clientId))} : forfait de mise en place + tarif récurrent, avec période « offerte » optionnelle.</div></div><button class="cta" onclick="openA1Offer('${clientId}')">Configurer l'offre</button></div></div>`;
+function a1OfferRefNext(){ const y=new Date().getFullYear(); const n=(DB.a1offers||[]).filter(o=>o.ref).length+1; return "BSM-OFF-A1-"+y+"-"+String(n).padStart(3,"0"); }
+function a1OfferCard(clientId, product){
+  product=product||"flotte"; const def=a1ProductDef(product); const o=a1Offer(clientId,product);
+  if(!o) return `<div class="card" style="border-left:3px solid var(--gold)"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px"><div><h2 style="margin:0">💼 ${def.icon} Offre — ${esc(def.label)}</h2><div class="msub" style="margin:2px 0 0">Associe une offre commerciale à ${esc(clientName(clientId))} : forfait de mise en place + tarif récurrent, éditable, exportable PDF et envoyable par mail.</div></div><button class="cta" onclick="openA1Offer('${clientId}','${product}')">Créer l'offre</button></div></div>`;
   const inOffert = o.offert && o.offertEnd && todayISO()<=o.offertEnd && todayISO()>=(o.offertStart||"");
   const bill=a1OfferBillingStart(o);
   return `<div class="card" style="border-left:3px solid ${inOffert?'var(--green)':'var(--gold)'}">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-      <div><h2 style="margin:0">💼 ${esc(o.label||"Offre programme A1")}</h2><div class="msub" style="margin:2px 0 0">${esc(clientName(clientId))} · ${entityShort(o.entity)}</div></div>
-      <button class="cta ghost sm" onclick="openA1Offer('${clientId}')">Modifier</button></div>
+      <div><h2 style="margin:0">💼 ${esc(o.label||def.label)}</h2><div class="msub" style="margin:2px 0 0">${esc(clientName(clientId))} · ${entityShort(o.entity)}${o.ref?" · "+esc(o.ref):""}${o.emailedAt?" · ✉️ envoyée le "+frDate(o.emailedAt):""}</div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="cta ghost sm" onclick="openA1Offer('${clientId}','${product}')">✎ Modifier</button>
+        <button class="cta ghost sm" onclick="printA1Offer('${o.id}')">🖨 PDF</button>
+        <button class="cta sm" onclick="mailA1Offer('${o.id}')">✉️ Envoyer</button></div></div>
     <div class="mini-list" style="margin-top:8px">
       <div class="li"><span>Mise en place (forfait)</span><b>${o.setupFee?fmt(o.setupFee,o.currency):"—"}</b></div>
       <div class="li"><span>Tarif récurrent (mensuel)</span><b>${o.monthlyFee?fmt(o.monthlyFee,o.currency):"—"}</b></div>
@@ -5574,26 +5615,89 @@ function a1OfferCard(clientId){
     ${inOffert?`<div class="hint" style="color:var(--green)">🎁 Programme actuellement offert — la facturation démarrera automatiquement le ${frDate(bill)}.</div>`:(o.monthlyFee?`<div class="hint">Facturation mensuelle active (récurrent lié dans le Budget & le Compte de résultat).</div>`:'')}
   </div>`;
 }
-function openA1Offer(clientId){
-  const o=a1Offer(clientId)||{clientId,entity:entityFilter||"bsmac",currency:DB.meta.defaultCurrency,offert:false,offertStart:todayISO(),offertEnd:"",label:"Programme A1 — suivi flotte & carburant"};
-  openModal(`<span class="close" onclick="closeModal()">✕</span><h2>Offre programme — ${esc(clientName(clientId))}</h2>
-    <div class="field"><label>Intitulé de l'offre</label><input id="ao-label" value="${esc(o.label||'')}" placeholder="Ex : Programme A1 — suivi flotte & carburant"></div>
+function openA1Offer(clientId, product){
+  product=product||"flotte"; const def=a1ProductDef(product);
+  const o=a1Offer(clientId,product)||{clientId,product,entity:entityFilter||"bsmac",currency:DB.meta.defaultCurrency,offert:false,offertStart:todayISO(),offertEnd:"",
+    label:def.label, intro:def.pitch, scope:def.scope, validite:"", terms:"Offre valable 30 jours à compter de son émission. Tarifs hors taxes en "+curName(DB.meta.defaultCurrency)+". Facturation mensuelle à terme échu. Engagement minimum de 3 mois, reconductible et résiliable ensuite avec un préavis d'un mois."};
+  openModal(`<span class="close" onclick="closeModal()">✕</span><h2>${def.icon} Offre — ${esc(clientName(clientId))}</h2>
+    <div class="msub" style="margin-top:-4px">${esc(def.label)}</div>
+    <div class="field"><label>Intitulé de l'offre</label><input id="ao-label" value="${esc(o.label||'')}" placeholder="${esc(def.label)}"></div>
+    <div class="field"><label>Introduction / présentation (éditable)</label><textarea id="ao-intro" rows="3" style="width:100%;font-family:inherit;padding:8px;border:1px solid var(--line);border-radius:8px">${esc(o.intro||'')}</textarea></div>
+    <div class="field"><label>Prestations incluses (une par ligne)</label><textarea id="ao-scope" rows="6" style="width:100%;font-family:inherit;padding:8px;border:1px solid var(--line);border-radius:8px">${esc(o.scope||'')}</textarea></div>
     <div class="field row2"><label>Forfait mise en place & tarif mensuel</label>
       <input type="number" id="ao-setup" value="${o.setupFee!=null?o.setupFee:''}" placeholder="forfait (une fois)"><input type="number" id="ao-monthly" value="${o.monthlyFee!=null?o.monthlyFee:''}" placeholder="tarif / mois"></div>
     <div class="field row2"><label>Devise & entité</label><select id="ao-cur">${curOptions(o.currency)}</select><select id="ao-entity">${entityOptions(o.entity)}</select></div>
     <div class="field"><label style="display:flex;align-items:center;gap:8px;font-weight:600"><input type="checkbox" id="ao-offert" ${o.offert?'checked':''} onchange="document.getElementById('ao-offdates').style.display=this.checked?'':'none'"> Offert (période gratuite avant le tarif normal)</label></div>
     <div class="field row2" id="ao-offdates" style="${o.offert?'':'display:none'}"><label>Début & fin de la période offerte</label>
       <input type="date" id="ao-offstart" value="${o.offertStart||todayISO()}"><input type="date" id="ao-offend" value="${o.offertEnd||''}"></div>
-    <div class="hint">À l'enregistrement : le forfait de mise en place et le tarif mensuel deviennent des <b>entrées</b> liées à ce client (Budget / CA / Compte de résultat). Pendant la période offerte : aucune facturation ; bascule au tarif normal automatique.</div>
-    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="saveA1Offer('${clientId}')">Enregistrer l'offre</button></div>`);
+    <div class="field"><label>Validité (facultatif) & conditions</label><input id="ao-validite" value="${esc(o.validite||'')}" placeholder="Ex : 30 jours" style="margin-bottom:6px"><textarea id="ao-terms" rows="3" style="width:100%;font-family:inherit;padding:8px;border:1px solid var(--line);border-radius:8px">${esc(o.terms||'')}</textarea></div>
+    <div class="hint">À l'enregistrement : le forfait et le tarif mensuel deviennent des <b>entrées</b> liées à ce client (Budget / CA / Compte de résultat). L'offre reste <b>éditable</b>, <b>exportable en PDF</b> et <b>envoyable par mail</b> depuis sa fiche.</div>
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="saveA1Offer('${clientId}','${product}')">Enregistrer l'offre</button></div>`);
 }
-function saveA1Offer(clientId){
-  let o=a1Offer(clientId);
-  const obj={ clientId, label:val("ao-label"), setupFee:Math.round(parseFloat(val("ao-setup"))||0), monthlyFee:Math.round(parseFloat(val("ao-monthly"))||0),
+function saveA1Offer(clientId, product){
+  product=product||"flotte"; let o=a1Offer(clientId,product);
+  const obj={ clientId, product, label:val("ao-label"), intro:val("ao-intro"), scope:val("ao-scope"), validite:val("ao-validite"), terms:val("ao-terms"),
+    setupFee:Math.round(parseFloat(val("ao-setup"))||0), monthlyFee:Math.round(parseFloat(val("ao-monthly"))||0),
     currency:val("ao-cur"), entity:val("ao-entity"), offert:document.getElementById("ao-offert").checked, offertStart:val("ao-offstart"), offertEnd:val("ao-offend") };
-  if(o){ Object.assign(o,obj); } else { obj.id=uid(); obj.created=todayISO(); DB.a1offers.push(obj); o=obj; }
+  if(o){ Object.assign(o,obj); } else { obj.id=uid(); obj.created=todayISO(); obj.ref=a1OfferRefNext(); DB.a1offers.push(obj); o=obj; }
+  if(!o.ref) o.ref=a1OfferRefNext();
   syncA1OfferRecurring(o);
-  save(); closeModal(); renderA1Fleet(); toast("Offre enregistrée — facturation liée mise à jour.");
+  save(); closeModal(); a1RefreshCurrent(); toast("Offre enregistrée — facturation liée mise à jour.");
+}
+function a1RefreshCurrent(){ if(currentScreen==="a1genset") renderA1Genset(); else renderA1Fleet(); }
+function syncA1OfferRecurring(o){
+  let rc=DB.recurring.find(r=>r.a1OfferId===o.id);
+  if(o.monthlyFee>0){
+    const start=a1OfferBillingStart(o);
+    const data={ sens:"entrant", label:(o.label||"Programme A1")+" — "+clientName(o.clientId), amount:o.monthlyFee, currency:o.currency,
+      category:"Abonnement annuel", frequency:"mensuel", day:1, startDate:start, clientId:o.clientId, entity:o.entity, active:true, a1OfferId:o.id };
+    if(rc){ Object.assign(rc,data); DB.transactions=DB.transactions.filter(t=>!(t.recurringId===rc.id&&t.status==="prevu")); }
+    else { data.id=uid(); data.created=todayISO(); DB.recurring.push(data); }
+  } else if(rc){ rc.active=false; }
+  generateRecurring();
+  if(o.setupFee>0 && !o.setupTxId){
+    const tx={ id:uid(), sens:"entrant", label:"Mise en place — "+(o.label||"Programme A1")+" · "+clientName(o.clientId), amount:o.setupFee, currency:o.currency,
+      category:"Honoraires mission", clientId:o.clientId, entity:o.entity, nature:"client", status:"prevu", date:o.offertStart||todayISO(), dueDate:o.offertStart||todayISO(), method:"" };
+    DB.transactions.push(tx); o.setupTxId=tx.id;
+  }
+}
+/* Corps imprimable de l'offre (réutilisé pour le PDF et le mail). */
+function a1OfferBody(o){
+  const cur=o.currency||DB.meta.defaultCurrency;
+  const bill=a1OfferBillingStart(o);
+  const scopeHtml=(o.scope||"").split(/\n+/).filter(Boolean).map(l=>`<li>${esc(l.replace(/^[•\-\s]+/,""))}</li>`).join("");
+  let rows=`<tr><td>Mise en place (forfait unique)</td><td style="text-align:right">${o.setupFee?fmt(o.setupFee,cur):"—"}</td></tr>`
+    +`<tr><td>Abonnement mensuel</td><td style="text-align:right">${o.monthlyFee?fmt(o.monthlyFee,cur)+" / mois":"—"}</td></tr>`;
+  if(o.offert && o.offertEnd) rows+=`<tr><td>Période offerte</td><td style="text-align:right;color:#128a45">${frDate(o.offertStart)} → ${frDate(o.offertEnd)} (facturation au ${frDate(bill)})</td></tr>`;
+  return `<p>${esc(o.intro||a1ProductDef(o.product).pitch)}</p>`
+    +`<h2 class="docsec">Prestations incluses</h2><ul>${scopeHtml||"<li>—</li>"}</ul>`
+    +`<h2 class="docsec">Conditions financières</h2>`
+    +`<table style="width:100%;border-collapse:collapse;font-size:13px"><tbody>${rows}</tbody></table>`
+    +(o.terms?`<h2 class="docsec">Conditions</h2><p style="font-size:12px;color:#4B5563">${esc(o.terms)}</p>`:"");
+}
+function a1OfferDocOpt(o){
+  const c=DB.clients.find(x=>x.id===o.clientId);
+  return { title:"Offre — "+(o.label||""), typeLabel:"Offre de service", ref:o.ref||"", date:frLong(todayISO()), validite:o.validite||"",
+    clientName:c?c.company:clientName(o.clientId), clientContact:c?(c.contactName||""):"", clientEmail:c?(c.contactEmail||""):"", objet:o.label||a1ProductDef(o.product).label };
+}
+function printA1Offer(offerId){
+  const o=(DB.a1offers||[]).find(x=>x.id===offerId); if(!o){ toast("Offre introuvable."); return; }
+  openPrintable(docChrome(a1OfferBody(o), a1OfferDocOpt(o)));
+}
+function mailA1Offer(offerId){
+  const o=(DB.a1offers||[]).find(x=>x.id===offerId); if(!o){ toast("Offre introuvable."); return; }
+  const c=DB.clients.find(x=>x.id===o.clientId); const to=(c&&c.contactEmail)||"";
+  if(!to){ toast("Renseignez l'e-mail du client dans sa fiche."); return; }
+  confirmModal("Envoyer l'offre par mail ?", "Destinataire : "+esc(to)+" — "+esc(o.label||""), async ()=>{
+    closeModal();
+    const html=docChrome(a1OfferBody(o), a1OfferDocOpt(o));
+    const subject="[BSM] "+(o.label||a1ProductDef(o.product).label)+" — "+(c?c.company:clientName(o.clientId));
+    try{
+      await googleCall("mail",{ to, subject, html, pdfHtml:html, pdfName:(o.ref||"offre-A1") });
+      o.emailedAt=todayISO(); o.emailedTo=to; save(); a1RefreshCurrent();
+      toast("Offre envoyée à "+to+" ✅");
+    }catch(e){ toast("Échec envoi : "+(e.message||e)+" — nécessite le serveur local + pont Google configuré."); }
+  });
 }
 function syncA1OfferRecurring(o){
   let rc=DB.recurring.find(r=>r.a1OfferId===o.id);
@@ -5610,6 +5714,212 @@ function syncA1OfferRecurring(o){
       category:"Honoraires mission", clientId:o.clientId, entity:o.entity, nature:"client", status:"prevu", date:o.offertStart||todayISO(), dueDate:o.offertStart||todayISO(), method:"" };
     DB.transactions.push(tx); o.setupTxId=tx.id;
   }
+}
+
+/* ===================== PROGRAMME A1 — Groupes électrogènes / JIRAMA ===================== */
+const A1_GEN_FUELS=["Diesel","Essence","Gaz","Autre"];
+const A1_GEN_USAGES=["Secours (délestage JIRAMA)","Continu (site isolé)","Appoint / écrêtage","Mixte"];
+let a1genClient=""; // "" = tous les clients
+function a1GenName(id){ const g=DB.a1gensets.find(x=>x.id===id); return g?g.name:"—"; }
+function a1GenClientName(g){ return g.clientId?clientName(g.clientId):(g.client||""); }
+function a1GenClientPicker(){
+  return `<select onchange="a1genClient=this.value;renderA1Genset()" title="Données par client" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;background:var(--navy);color:#fff;font-weight:600">
+    <option value="">👥 Tous les clients</option>
+    ${DB.clients.map(c=>`<option value="${c.id}" ${a1genClient===c.id?'selected':''}>${esc(c.company)}</option>`).join("")}</select>`;
+}
+// Modèle carburant : un groupe consomme ~30% du débit nominal à vide, puis proportionnel à la charge.
+function a1GenExpectedLh(consoTheoLh, chargePct){ if(!(consoTheoLh>0)) return 0; const c=(chargePct>0?chargePct:100)/100; return consoTheoLh*(0.30+0.70*c); }
+function a1GenCompute(clientId){
+  const yr=new Date().getFullYear(); const perG={};
+  DB.a1gensets.filter(g=>!clientId||g.clientId===clientId).forEach(g=>{ perG[g.id]={g, hours:0, liters:0, kwh:0, cost:0, chW:0, jkwh:0, jkwhW:0, n:0}; });
+  DB.a1genlogs.forEach(l=>{ const p=perG[l.gensetId]; if(!p) return;
+    const h=+l.hours||0; p.hours+=h; p.liters+=(+l.liters||0); p.kwh+=(+l.kwh||0);
+    p.cost+=toDefault(+l.cost||0,l.currency||DB.meta.defaultCurrency);
+    if(l.chargePct>0){ p.chW+=(+l.chargePct)*(h||1); } // charge moyenne pondérée par les heures
+    if(l.jiramaPrice>0){ p.jkwh+=(+l.jiramaPrice)*((+l.kwh)||1); p.jkwhW+=((+l.kwh)||1); }
+    p.n++;
+  });
+  const arr=Object.values(perG).map(p=>{
+    p.chargePct = p.hours>0 && p.chW>0 ? p.chW/p.hours : 0;
+    p.realLh = p.hours>0 ? p.liters/p.hours : 0;
+    p.consoTheo = +p.g.consoTheoLh||0;
+    p.expectedLh = a1GenExpectedLh(p.consoTheo, p.chargePct);
+    p.driftLh = p.expectedLh>0 && p.realLh>0 ? (p.realLh/p.expectedLh-1)*100 : null; // dérive vs attendu
+    p.rendement = p.liters>0 ? p.kwh/p.liters : 0; // kWh par litre
+    p.costPerKwh = p.kwh>0 ? p.cost/p.kwh : 0;
+    p.costPerHour = p.hours>0 ? p.cost/p.hours : 0;
+    p.jiramaKwh = p.jkwhW>0 ? p.jkwh/p.jkwhW : 0;
+    p.vsJirama = (p.costPerKwh>0 && p.jiramaKwh>0) ? p.costPerKwh - p.jiramaKwh : null; // >0 = plus cher que le réseau
+    p.age = p.g.annee ? Math.max(0,yr-(+p.g.annee)) : null;
+    p.anomaly = p.driftLh!=null && p.driftLh>20;           // surconso vs attendu → entretien / détournement
+    p.lowLoad = p.chargePct>0 && p.chargePct<30;           // sous-charge → groupe surdimensionné, rendement dégradé
+    return p;
+  });
+  const totals={ hours:arr.reduce((s,p)=>s+p.hours,0), liters:arr.reduce((s,p)=>s+p.liters,0), kwh:arr.reduce((s,p)=>s+p.kwh,0), cost:arr.reduce((s,p)=>s+p.cost,0) };
+  totals.rendement = totals.liters>0 ? totals.kwh/totals.liters : 0;
+  totals.costPerKwh = totals.kwh>0 ? totals.cost/totals.kwh : 0;
+  const jArr=arr.filter(p=>p.jiramaKwh>0); totals.jiramaKwh = jArr.length? jArr.reduce((s,p)=>s+p.jiramaKwh,0)/jArr.length : 0;
+  totals.jiramaEquiv = totals.jiramaKwh>0 ? totals.kwh*totals.jiramaKwh : 0; // ce que le même kWh coûterait au réseau
+  return {arr, totals};
+}
+function renderA1Genset(){
+  const {arr, totals}=a1GenCompute(a1genClient);
+  const anomalies=arr.filter(p=>p.anomaly), lowLoads=arr.filter(p=>p.lowLoad);
+  const rows=arr.sort((a,b)=>(b.driftLh||0)-(a.driftLh||0)).map(p=>`
+    <tr>
+      <td><b>${esc(p.g.name)}</b><div style="font-size:11px;color:var(--muted)">${[p.g.puissanceKva?p.g.puissanceKva+" kVA":"",p.g.carburant,p.age!=null?p.age+" ans":""].filter(Boolean).join(" · ")}${a1GenClientName(p.g)?" · "+esc(a1GenClientName(p.g)):""}</div></td>
+      <td style="text-align:right">${p.hours?Math.round(p.hours).toLocaleString('fr-FR')+" h":"—"}</td>
+      <td style="text-align:right">${p.kwh?Math.round(p.kwh).toLocaleString('fr-FR'):"—"}</td>
+      <td style="text-align:right;font-weight:600;${p.anomaly?'color:var(--red)':''}">${p.realLh?p.realLh.toFixed(1)+" L/h":"—"}${p.anomaly?' ⚠️':''}${p.driftLh!=null?`<div style="font-size:10px;font-weight:400;color:${p.driftLh>20?'var(--red)':p.driftLh>0?'var(--amber)':'var(--green)'}">vs attendu ${p.driftLh>0?'+':''}${p.driftLh.toFixed(0)}%</div>`:""}</td>
+      <td style="text-align:right">${p.rendement?p.rendement.toFixed(2)+" kWh/L":"—"}</td>
+      <td style="text-align:right">${p.costPerKwh?fmtD(p.costPerKwh):"—"}${p.vsJirama!=null?`<div style="font-size:10px;color:${p.vsJirama>0?'var(--red)':'var(--green)'}">${p.vsJirama>0?'+':''}${fmtD(p.vsJirama)} vs JIRAMA</div>`:""}${p.lowLoad?`<div style="font-size:10px;color:var(--amber)">charge ${p.chargePct.toFixed(0)}% ⚠️</div>`:""}</td>
+      <td><div class="rowact"><button class="iconbtn" title="Relevés" onclick="openA1GenLogList('${p.g.id}')">📄</button><button class="iconbtn" onclick="openA1Genset('${p.g.id}')">✎</button><button class="iconbtn del" onclick="deleteA1Genset('${p.g.id}')">🗑</button></div></td>
+    </tr>`).join("");
+  document.getElementById("scr-a1genset").innerHTML=`
+    <button class="backlink" onclick="setScreen('audit')">← Retour aux audits</button>
+    <div class="pagetitle"><div><h1>🔌 A1 — Groupes électrogènes / JIRAMA</h1><div class="sub">Rendement, coût du kWh vs réseau, dérives & anomalies — prestation d'optimisation énergétique</div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="cta ghost" onclick="openA1GenImport()">⇊ Importer CSV</button>
+        <button class="cta ghost" onclick="openA1Genset()">+ Groupe</button>
+        <button class="cta ghost" onclick="openA1GenLog()">+ Relevé</button>
+        <button class="cta gold" onclick="a1GenAnalyze()">🤖 Analyse IA</button>
+        <button class="cta ghost" onclick="printA1GenReport()">🖨 Rapport</button></div></div>
+    <div class="filters">${a1GenClientPicker()}<span style="font-size:12px;color:var(--muted)">${a1genClient?"Données de "+esc(clientName(a1genClient)):"Vue tous groupes confondus"}</span></div>
+    ${a1genClient?a1OfferCard(a1genClient,"genset"):`<div class="infobox">Sélectionne un <b>client</b> pour gérer ses groupes séparément et lui associer une <b>offre programme</b> énergie (forfait + tarif, éditable, PDF, mail).</div>`}
+    <div class="kpis">
+      <div class="kpi"><div class="v">${Math.round(totals.kwh).toLocaleString('fr-FR')}</div><div class="l">kWh produits</div></div>
+      <div class="kpi"><div class="v">${totals.rendement?totals.rendement.toFixed(2):"—"}</div><div class="l">Rendement moyen (kWh/L)</div></div>
+      <div class="kpi"><div class="v">${totals.costPerKwh?fmtD(totals.costPerKwh):"—"}</div><div class="l">Coût du kWh produit</div></div>
+      <div class="kpi"><div class="v ${anomalies.length?'danger':''}">${anomalies.length}</div><div class="l">Groupes en surconsommation</div></div>
+    </div>
+    ${totals.jiramaKwh>0?`<div class="card" style="border-left:3px solid var(--navy)"><b>⚡ Comparatif réseau JIRAMA :</b> ${Math.round(totals.kwh).toLocaleString('fr-FR')} kWh produits au groupe = <b>${fmtD(totals.cost)}</b> ; au tarif réseau (${fmtD(totals.jiramaKwh)}/kWh) cela coûterait <b>${fmtD(totals.jiramaEquiv)}</b> → ${totals.cost>totals.jiramaEquiv?`surcoût d'autonomie de <b style="color:var(--amber)">${fmtD(totals.cost-totals.jiramaEquiv)}</b> (prix de la continuité pendant les délestages)`:`<b style="color:var(--green)">économie de ${fmtD(totals.jiramaEquiv-totals.cost)}</b> vs réseau`}.</div>`:""}
+    ${anomalies.length||lowLoads.length?`<div class="card" style="border-left:3px solid var(--red)">${anomalies.length?`<b>⚠️ Surconsommations :</b> ${anomalies.map(p=>esc(p.g.name)+" ("+p.realLh.toFixed(1)+" L/h, +"+p.driftLh.toFixed(0)+"% vs attendu)").join(" · ")}. À vérifier : entretien, injecteurs, charge, ou détournement de carburant.`:""}${anomalies.length&&lowLoads.length?"<br>":""}${lowLoads.length?`<b style="color:var(--amber)">Sous-charge :</b> ${lowLoads.map(p=>esc(p.g.name)+" ("+p.chargePct.toFixed(0)+"%)").join(" · ")} — groupe surdimensionné, rendement et durée de vie dégradés.`:""}</div>`:""}
+    <div class="card"><h2>Parc de groupes (${DB.a1gensets.length} groupes · ${DB.a1genlogs.length} relevés)</h2>
+      ${arr.length?`<div style="overflow-x:auto"><table><thead><tr><th>Groupe</th><th style="text-align:right">Heures</th><th style="text-align:right">kWh</th><th style="text-align:right">Conso</th><th style="text-align:right">Rendement</th><th style="text-align:right">Coût/kWh</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:`<div class="empty">Aucun groupe. Cliquez « + Groupe » ou « ⇊ Importer CSV ».</div>`}
+    </div>`;
+}
+function openA1Genset(id){
+  const g=id?DB.a1gensets.find(x=>x.id===id):{carburant:"Diesel",clientId:a1genClient};
+  openModal(`<span class="close" onclick="closeModal()">✕</span><h2>${id?"Modifier le groupe":"Nouveau groupe électrogène"}</h2>
+    <div class="field"><label>Nom / identifiant *</label><input id="g-name" value="${esc(g.name||'')}" placeholder="Ex : Groupe siège 100 kVA"></div>
+    <div class="field row2"><label>Marque & modèle</label>
+      <input id="g-marque" value="${esc(g.marque||'')}" placeholder="Ex : Cummins"><input id="g-modele" value="${esc(g.modele||'')}" placeholder="Ex : C100 D5"></div>
+    <div class="field row2"><label>Puissance (kVA) & (kW)</label>
+      <input type="number" id="g-kva" value="${g.puissanceKva!=null?g.puissanceKva:''}" placeholder="kVA"><input type="number" id="g-kw" value="${g.puissanceKw!=null?g.puissanceKw:''}" placeholder="kW"></div>
+    <div class="field row2"><label>Année de mise en service & carburant</label>
+      <input type="number" id="g-annee" value="${g.annee!=null?g.annee:''}" placeholder="Ex : 2018"><select id="g-fuel">${A1_GEN_FUELS.map(t=>`<option ${g.carburant===t?'selected':''}>${t}</option>`).join("")}</select></div>
+    <div class="field row2"><label>Conso constructeur (L/h à pleine charge) & réservoir (L)</label>
+      <input type="number" step="0.1" id="g-consotheo" value="${g.consoTheoLh!=null?g.consoTheoLh:''}" placeholder="Ex : 24"><input type="number" id="g-reservoir" value="${g.reservoirL!=null?g.reservoirL:''}" placeholder="litres"></div>
+    <div class="field row2"><label>Compteur horaire actuel & usage</label>
+      <input type="number" id="g-compteur" value="${g.heuresCompteur!=null?g.heuresCompteur:''}" placeholder="heures au compteur"><select id="g-usage"><option value="">— Usage —</option>${A1_GEN_USAGES.map(t=>`<option ${g.usage===t?'selected':''}>${t}</option>`).join("")}</select></div>
+    <div class="field"><label>Client (cockpit)</label><select id="g-client"><option value="">— Aucun —</option>${DB.clients.map(c=>`<option value="${c.id}" ${g.clientId===c.id?'selected':''}>${esc(c.company)}</option>`).join("")}</select></div>
+    <div class="hint">La <b>conso constructeur</b> (L/h à pleine charge) sert de référence : le Cockpit estime la conso attendue selon la charge réelle et calcule la dérive → détection des surconsommations, sous-charges et anomalies.</div>
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="saveA1Genset('${id||''}')">Enregistrer</button></div>`);
+}
+function saveA1Genset(id){
+  const name=(val("g-name")||"").trim(); if(!name){ toast("Nom obligatoire."); return; }
+  const obj={name, marque:val("g-marque"), modele:val("g-modele"), puissanceKva:parseFloat(val("g-kva"))||"", puissanceKw:parseFloat(val("g-kw"))||"",
+    annee:parseInt(val("g-annee"))||"", carburant:val("g-fuel"), consoTheoLh:parseFloat(val("g-consotheo"))||"", reservoirL:parseFloat(val("g-reservoir"))||"",
+    heuresCompteur:parseFloat(val("g-compteur"))||"", usage:val("g-usage"), clientId:val("g-client")};
+  if(id){ Object.assign(DB.a1gensets.find(x=>x.id===id),obj); } else { obj.id=uid(); DB.a1gensets.push(obj); }
+  save(); closeModal(); renderA1Genset(); toast("Groupe enregistré.");
+}
+function deleteA1Genset(id){ const g=DB.a1gensets.find(x=>x.id===id); if(!g) return;
+  const n=DB.a1genlogs.filter(l=>l.gensetId===id).length;
+  confirmModal("Supprimer ce groupe ?", esc(g.name)+(n?` et ses ${n} relevé(s)`:""), ()=>{ DB.a1gensets=DB.a1gensets.filter(x=>x.id!==id); DB.a1genlogs=DB.a1genlogs.filter(l=>l.gensetId!==id); save(); closeModal(); renderA1Genset(); toast("Supprimé."); }); }
+function openA1GenLog(id, gensetId){
+  const l=id?DB.a1genlogs.find(x=>x.id===id):{date:todayISO(),currency:DB.meta.defaultCurrency,gensetId:gensetId||""};
+  if(!DB.a1gensets.length){ toast("Ajoutez d'abord un groupe."); return; }
+  openModal(`<span class="close" onclick="closeModal()">✕</span><h2>${id?"Modifier le relevé":"Nouveau relevé"}</h2>
+    <div class="field row2"><label>Groupe & date</label>
+      <select id="gl-gen">${DB.a1gensets.map(g=>`<option value="${g.id}" ${l.gensetId===g.id?'selected':''}>${esc(g.name)}</option>`).join("")}</select>
+      <input type="date" id="gl-date" value="${l.date||todayISO()}"></div>
+    <div class="field row2"><label>Heures de fonctionnement & litres consommés</label>
+      <input type="number" step="0.1" id="gl-hours" value="${l.hours!=null?l.hours:''}" placeholder="heures"><input type="number" step="0.1" id="gl-liters" value="${l.liters!=null?l.liters:''}" placeholder="litres"></div>
+    <div class="field row2"><label>Énergie produite (kWh) & charge moyenne (%)</label>
+      <input type="number" step="0.1" id="gl-kwh" value="${l.kwh!=null?l.kwh:''}" placeholder="kWh (si compteur)"><input type="number" id="gl-charge" value="${l.chargePct!=null?l.chargePct:''}" placeholder="% de charge"></div>
+    <div class="field row2"><label>Coût carburant & devise</label>
+      <input type="number" id="gl-cost" value="${l.cost!=null?l.cost:''}"><select id="gl-cur">${curOptions(l.currency)}</select></div>
+    <div class="field"><label>Tarif réseau JIRAMA (par kWh, pour comparaison — facultatif)</label><input type="number" step="0.01" id="gl-jirama" value="${l.jiramaPrice!=null?l.jiramaPrice:''}" placeholder="prix du kWh JIRAMA"></div>
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="saveA1GenLog('${id||''}')">Enregistrer</button></div>`);
+}
+function saveA1GenLog(id){
+  const obj={ gensetId:val("gl-gen"), date:val("gl-date")||todayISO(), hours:parseFloat(val("gl-hours"))||0, liters:parseFloat(val("gl-liters"))||0,
+    kwh:parseFloat(val("gl-kwh"))||0, chargePct:parseFloat(val("gl-charge"))||0, cost:parseFloat(val("gl-cost"))||0, currency:val("gl-cur"), jiramaPrice:parseFloat(val("gl-jirama"))||0 };
+  if(!obj.gensetId){ toast("Sélectionnez un groupe."); return; }
+  if(id){ Object.assign(DB.a1genlogs.find(x=>x.id===id),obj); } else { obj.id=uid(); DB.a1genlogs.push(obj); }
+  save(); closeModal(); renderA1Genset(); toast("Relevé enregistré.");
+}
+function openA1GenLogList(gid){
+  const g=DB.a1gensets.find(x=>x.id===gid); const logs=DB.a1genlogs.filter(l=>l.gensetId===gid).sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  openModal(`<span class="close" onclick="closeModal()">✕</span><h2>Relevés — ${esc(g?g.name:'')}</h2>
+    <div style="margin-bottom:8px"><button class="cta ghost sm" onclick="openA1GenLog(null,'${gid}')">+ Relevé</button></div>
+    ${logs.length?`<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th style="text-align:right">Heures</th><th style="text-align:right">L</th><th style="text-align:right">kWh</th><th style="text-align:right">Charge</th><th style="text-align:right">Coût</th><th></th></tr></thead><tbody>`+logs.map(l=>`<tr><td>${frDate(l.date)}</td><td style="text-align:right">${(+l.hours||0)}</td><td style="text-align:right">${Math.round(+l.liters||0)}</td><td style="text-align:right">${l.kwh?Math.round(+l.kwh):"—"}</td><td style="text-align:right">${l.chargePct?l.chargePct+"%":"—"}</td><td style="text-align:right">${fmt(l.cost,l.currency)}</td><td><div class="rowact"><button class="iconbtn" onclick="closeModal();openA1GenLog('${l.id}')">✎</button><button class="iconbtn del" onclick="deleteA1GenLog('${l.id}','${gid}')">🗑</button></div></td></tr>`).join("")+`</tbody></table></div>`:`<div class="empty">Aucun relevé.</div>`}
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Fermer</button></div>`);
+}
+function deleteA1GenLog(id,gid){ DB.a1genlogs=DB.a1genlogs.filter(x=>x.id!==id); save(); openA1GenLogList(gid); renderA1Genset(); }
+function openA1GenImport(){
+  openModal(`<span class="close" onclick="closeModal()">✕</span><h2>Importer des relevés groupes (CSV / Excel)</h2>
+    <div class="msub">Colle les données ou charge un CSV. Colonnes reconnues : <b>groupe, date, heures, litres, kwh, charge, coût, jirama</b> (ordre et accents libres).</div>
+    <div class="field"><label>Coller les lignes (1re ligne = en-têtes)</label><textarea id="gi-csv" rows="7" placeholder="groupe;date;heures;litres;kwh;charge;coût\nGroupe siège;2026-07-01;120;300;1050;70;1500000" style="width:100%;font-family:monospace;font-size:12px;padding:8px;border:1px solid var(--line);border-radius:8px"></textarea></div>
+    <div class="field"><label>… ou fichier CSV</label><input type="file" id="gi-file" accept=".csv,text/csv" onchange="a1GenFileToBox()"></div>
+    <div class="field row2"><label>Client & devise des coûts</label>
+      <select id="gi-client"><option value="">— Aucun client —</option>${DB.clients.map(c=>`<option value="${c.id}" ${a1genClient===c.id?'selected':''}>${esc(c.company)}</option>`).join("")}</select>
+      <select id="gi-cur">${curOptions(DB.meta.defaultCurrency)}</select></div>
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="runA1GenImport()">Importer</button></div>`);
+}
+function a1GenFileToBox(){ const f=document.getElementById("gi-file").files[0]; if(!f) return; const r=new FileReader(); r.onload=e=>{ document.getElementById("gi-csv").value=e.target.result; }; r.readAsText(f); }
+function a1GenParseCSV(text){
+  const lines=String(text||"").trim().split(/\r?\n/).filter(l=>l.trim()); if(lines.length<2) return [];
+  const sep=(lines[0].split(";").length>lines[0].split(",").length)?";":(lines[0].indexOf("\t")>=0?"\t":",");
+  const head=lines[0].split(sep).map(h=>h.trim().toLowerCase());
+  const idx=names=>{ for(const n of names){ const i=head.findIndex(h=>h.indexOf(n)>=0); if(i>=0) return i; } return -1; };
+  const iG=idx(["groupe","group","genset","machine","nom"]), iDate=idx(["date"]), iH=idx(["heure","hours","h"]), iL=idx(["litre","carburant","gasoil","fuel","conso"]),
+        iK=idx(["kwh","energie","énergie","kw"]), iC=idx(["charge","load","%"]), iCost=idx(["coût","cout","cost","montant","prix"]), iJ=idx(["jirama","reseau","réseau","tarif"]);
+  const num=s=>parseFloat(String(s==null?"":s).replace(/\s/g,"").replace(/[^\d.,-]/g,"").replace(",","."))||0;
+  const out=[];
+  for(let r=1;r<lines.length;r++){ const c=lines[r].split(sep); if(!c.length) continue;
+    out.push({ gen:(iG>=0?c[iG]:"").trim(), date:(iDate>=0?c[iDate]:"").trim()||todayISO(), hours:num(iH>=0?c[iH]:0), liters:num(iL>=0?c[iL]:0), kwh:num(iK>=0?c[iK]:0), chargePct:num(iC>=0?c[iC]:0), cost:num(iCost>=0?c[iCost]:0), jiramaPrice:num(iJ>=0?c[iJ]:0) }); }
+  return out.filter(r=>r.gen);
+}
+function runA1GenImport(){
+  const rows=a1GenParseCSV(val("gi-csv")); const cur=val("gi-cur")||DB.meta.defaultCurrency; const cid=val("gi-client")||"";
+  if(!rows.length){ toast("Aucune ligne exploitable (vérifie l'en-tête)."); return; }
+  let ng=0, nl=0;
+  rows.forEach(r=>{ let g=DB.a1gensets.find(x=>x.name.toLowerCase()===r.gen.toLowerCase() && (!cid || x.clientId===cid));
+    if(!g){ g={id:uid(),name:r.gen,carburant:"Diesel",clientId:cid}; DB.a1gensets.push(g); ng++; }
+    DB.a1genlogs.push({id:uid(),gensetId:g.id,date:r.date,hours:r.hours,liters:r.liters,kwh:r.kwh,chargePct:r.chargePct,cost:r.cost,currency:cur,jiramaPrice:r.jiramaPrice}); nl++;
+  });
+  save(); closeModal(); renderA1Genset(); toast(nl+" relevé(s) importé(s), "+ng+" groupe(s) créé(s).");
+}
+function buildGensetContext(){
+  const {arr, totals}=a1GenCompute(a1genClient);
+  let t=`Analyse de groupes électrogènes (méthode BSM, Madagascar — contexte délestages JIRAMA). Devise ${DB.meta.defaultCurrency}. Total ${Math.round(totals.hours)} h, ${Math.round(totals.liters)} L, ${Math.round(totals.kwh)} kWh, coût carburant ${fmtD(totals.cost)}. Rendement moyen ${totals.rendement?totals.rendement.toFixed(2):"?"} kWh/L, coût ${fmtD(totals.costPerKwh)}/kWh${totals.jiramaKwh?`, tarif réseau JIRAMA ${fmtD(totals.jiramaKwh)}/kWh (équivalent réseau ${fmtD(totals.jiramaEquiv)})`:""}.\nGroupes :\n`;
+  arr.forEach(p=>{ t+=`- ${p.g.name} (${[p.g.puissanceKva?p.g.puissanceKva+" kVA":"",p.g.carburant,p.age!=null?p.age+" ans":""].filter(Boolean).join(", ")||"?"}) : ${Math.round(p.hours)} h, ${Math.round(p.liters)} L, ${Math.round(p.kwh)} kWh, conso réelle ${p.realLh?p.realLh.toFixed(1):"?"} L/h${p.consoTheo?` (constructeur ${p.consoTheo} L/h à pleine charge ; attendu ${p.expectedLh.toFixed(1)} à ${p.chargePct?p.chargePct.toFixed(0)+"% de charge":"charge inconnue"} → dérive ${p.driftLh!=null?(p.driftLh>0?"+":"")+p.driftLh.toFixed(0)+"%":"?"})`:""}, rendement ${p.rendement?p.rendement.toFixed(2):"?"} kWh/L, ${fmtD(p.costPerKwh)}/kWh${p.vsJirama!=null?` (${p.vsJirama>0?"+":""}${fmtD(p.vsJirama)}/kWh vs réseau)`:""}${p.anomaly?" [SURCONSOMMATION]":""}${p.lowLoad?" [SOUS-CHARGE]":""}.\n`; });
+  t+="\nIdentifie : surconsommations (entretien, injecteurs, filtres, ou détournement de carburant), groupes en sous-charge (surdimensionnés → rendement et durée de vie dégradés), rendement anormalement bas, et l'arbitrage coût groupe vs réseau JIRAMA. Donne des recommandations concrètes, chiffrées et hiérarchisées, en tenant compte des délestages.";
+  return t.slice(0,6500);
+}
+async function a1GenAnalyze(){
+  if(!DB.a1genlogs.length){ toast("Ajoutez ou importez des relevés d'abord."); return; }
+  openModal(`<span class="close" onclick="closeModal()">✕</span><h2>🤖 Analyse IA — Groupes électrogènes</h2><div id="gen-ai" class="msub">Analyse en cours…</div>`);
+  try{
+    const sys="Tu es un ingénieur énergie / analyste pour un cabinet de conseil à Madagascar (contexte de délestages JIRAMA fréquents). À partir des données de groupes électrogènes, identifie les surconsommations et leurs causes probables (entretien, injecteurs, charge inadaptée, détournement de carburant), les groupes surdimensionnés (sous-charge), le rendement (kWh/L), et l'arbitrage économique entre production autonome et réseau. Donne des recommandations concrètes, chiffrées et hiérarchisées, puis 3 actions prioritaires. Sois concret et bref.";
+    const txt=await aiChat(sys, buildGensetContext(), 900, "a1gen");
+    const el=document.getElementById("gen-ai"); if(el){ el.className=""; el.style.whiteSpace="pre-wrap"; el.style.fontSize="13px"; el.style.lineHeight="1.55"; el.textContent=txt; }
+  }catch(e){ const el=document.getElementById("gen-ai"); if(el) el.innerHTML=`<span style="color:var(--red)">${esc(e.message||"Erreur IA")}. Vérifiez la clé Mistral dans ⚙ Paramètres.</span>`; }
+}
+function printA1GenReport(){
+  const {arr, totals}=a1GenCompute(a1genClient);
+  const body=arr.sort((a,b)=>(b.driftLh||0)-(a.driftLh||0)).map(p=>`<tr><td>${esc(p.g.name)}${p.g.puissanceKva?" ("+p.g.puissanceKva+" kVA)":""}</td><td style="text-align:right">${Math.round(p.hours)}</td><td style="text-align:right">${Math.round(p.kwh)}</td><td style="text-align:right">${p.realLh?p.realLh.toFixed(1):"—"}</td><td style="text-align:right">${p.rendement?p.rendement.toFixed(2):"—"}</td><td style="text-align:right">${fmtD(p.costPerKwh)}</td></tr>`).join("");
+  const anomalies=arr.filter(p=>p.anomaly);
+  document.getElementById("report").innerHTML=`<div class="rep">
+    ${repHeader("Analyse de groupes électrogènes & énergie","Programme A1 · "+DB.a1gensets.length+" groupes · devise "+DB.meta.defaultCurrency)}
+    <p class="meta">Total : ${Math.round(totals.hours)} h · ${Math.round(totals.liters)} L · ${Math.round(totals.kwh)} kWh · coût ${fmtD(totals.cost)} · rendement ${totals.rendement.toFixed(2)} kWh/L · coût ${fmtD(totals.costPerKwh)}/kWh.${totals.jiramaKwh>0?` Équivalent réseau JIRAMA : ${fmtD(totals.jiramaEquiv)} (${totals.cost>totals.jiramaEquiv?"surcoût d'autonomie "+fmtD(totals.cost-totals.jiramaEquiv):"économie "+fmtD(totals.jiramaEquiv-totals.cost)}).`:""}</p>
+    ${anomalies.length?`<p class="meta"><b>Surconsommations :</b> ${anomalies.map(p=>esc(p.g.name)+" (+"+p.driftLh.toFixed(0)+"%)").join(", ")}.</p>`:""}
+    <table><tr><th>Groupe</th><th style="text-align:right">Heures</th><th style="text-align:right">kWh</th><th style="text-align:right">L/h</th><th style="text-align:right">kWh/L</th><th style="text-align:right">Coût/kWh</th></tr>${body}</table>
+    <p class="meta">Édité le ${frDate(todayISO())} — ${DB.meta.cabinetName||"BSM Advisory & Consulting"}.</p>
+  </div>`;
+  window.print();
 }
 
 /* ----------------------------- Import R5 (CSV / Google Sheet publié) ----------------------------- */
