@@ -317,7 +317,7 @@
   <div class="brand" id="brandbox" onclick="goHome()" style="cursor:pointer" title="Revenir au tableau de bord">BSM <span>COCKPIT</span> — Pilotage interne</div>
   <div class="topbar-right">
     <button class="tb-btn" id="home-btn" onclick="goHome()" title="Revenir au tableau de bord" style="display:none;font-weight:700;color:var(--navy)">← Tableau de bord</button>
-    <div class="gsearch"><input id="globalsearch" placeholder="Rechercher un client, risque…" autocomplete="off" oninput="globalSearch(this.value)" onblur="setTimeout(hideSearch,180)"><div class="gs-results" id="gs-results"></div></div>
+    <div class="gsearch"><input id="globalsearch" placeholder="Rechercher…  (Ctrl+K)" title="Recherche globale — raccourci Ctrl+K ou /" autocomplete="off" oninput="globalSearch(this.value)" onblur="setTimeout(hideSearch,180)"><div class="gs-results" id="gs-results"></div></div>
     <button class="tb-btn" id="notif-bell" onclick="goNotifications()" title="Notifications — activité récente" style="position:relative;display:none">🔔<span id="notif-count" style="display:none;position:absolute;top:-5px;right:-5px;background:var(--red);color:#fff;border-radius:9px;min-width:16px;height:16px;font-size:10px;line-height:16px;padding:0 3px;font-weight:700;text-align:center">0</span></button>
     <button class="tb-btn" id="theme-btn" onclick="toggleTheme()" title="Thème clair / sombre">🌙</button>
     <span id="server-status" class="tb-btn" style="display:none;align-items:center;gap:4px" title="État de la connexion au serveur BSM"></span>
@@ -545,6 +545,7 @@ function load(){
   DB.users=DB.users||[]; DB.activityLog=DB.activityLog||[]; DB.notifications=DB.notifications||[]; DB.moneyRequests=DB.moneyRequests||[]; DB.investments=DB.investments||[]; DB.decisions=DB.decisions||[];
   DB.a1vehicles=DB.a1vehicles||[]; DB.a1logs=DB.a1logs||[]; DB.a1gensets=DB.a1gensets||[]; DB.a1genlogs=DB.a1genlogs||[]; DB.a1offers=DB.a1offers||[];
   DB.a1offers.forEach(o=>{ if(!o.product) o.product="flotte"; }); // migration : offres existantes = programme flotte
+  if(!DB.meta.fuelPrices) DB.meta.fuelPrices={gasoil:0,essence:0};
   DB.docTemplates=DB.docTemplates||[]; DB.clientDocs=DB.clientDocs||[]; DB.aiUsage=DB.aiUsage||[];
   DB.assistants=DB.assistants||[]; DB.aiSettings=DB.aiSettings||[]; DB.reports=DB.reports||[]; DB.knowledge=DB.knowledge||[];
   if(!DB.meta.assistantsSeeded){ if(!DB.assistants.length){ DB.assistants=defaultAssistants(); DB.aiSettings=[{ id:"main", basePrompt:defaultAiBasePrompt(), routing:defaultAiRouting() }]; } DB.meta.assistantsSeeded=true; }
@@ -1382,22 +1383,44 @@ function validationPanelHtml(compact){
 /* ----------------------------- Tableau de bord ----------------------------- */
 function dashLink(screen,label){ return `<a href="#" onclick="setScreen('${screen}');return false;" style="font-size:12.5px;color:var(--navy);font-weight:600;text-decoration:none;">${label} →</a>`; }
 // Carte d'accueil « Par où commencer » — guide un nouveau collaborateur ; se masque une fois pris en main.
+function onboardingSteps(){
+  return [
+    {ic:"👥", t:"Ajouter un premier client", d:"Créez une fiche client ou importez un audit R5.", done:(DB.clients||[]).length>0, go:"openClientForm()"},
+    {ic:"🛡️", t:"Renseigner un risque", d:"Via un audit synchronisé ou la matrice des risques.", done:(DB.risks||[]).length>0, go:"setScreen('risks')"},
+    {ic:"💰", t:"Créer une mission ou un mouvement", d:"Budget & CA se remplissent automatiquement ensuite.", done:((DB.missions||[]).length>0||(DB.transactions||[]).length>0), go:"setScreen('missions')"},
+    {ic:"🎨", t:"Personnaliser le cabinet", d:"Ajoutez votre logo dans ⚙ Paramètres.", done:!!DB.meta.logo, go:"openSettings()"}
+  ];
+}
 function onboardingCardHtml(){
   if(DB.meta.onboardingDone) return "";
-  const step=(n,ic,titre,desc,action)=>`<div style="flex:1;min-width:180px;border:1px solid var(--line);border-radius:10px;padding:12px;background:#fff;cursor:pointer" onclick="${action}"><div style="font-size:20px">${ic}</div><div style="font-weight:700;font-size:13px;margin:3px 0"><span style="color:var(--gold)">${n}.</span> ${titre}</div><div style="font-size:11.5px;color:var(--muted);line-height:1.35">${desc}</div></div>`;
+  const steps=onboardingSteps(); const done=steps.filter(s=>s.done).length; const pct=Math.round(done/steps.length*100);
+  if(done>=steps.length) return ""; // tout est fait → on n'encombre plus le tableau de bord
+  const card=(s,i)=>`<div style="flex:1;min-width:185px;border:1px solid ${s.done?'var(--green)':'var(--line)'};border-radius:11px;padding:12px;background:${s.done?'#F3FAF5':'#fff'};cursor:${s.done?'default':'pointer'};transition:box-shadow .13s ease" ${s.done?'':`onclick="${s.go}"`} onmouseover="this.style.boxShadow='var(--sh-card)'" onmouseout="this.style.boxShadow='none'">
+    <div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:20px">${s.ic}</span><span style="font-size:15px">${s.done?'✅':`<span style="color:var(--gold);font-weight:700">${i+1}</span>`}</span></div>
+    <div style="font-weight:700;font-size:13px;margin:5px 0 2px;${s.done?'color:var(--muted);text-decoration:line-through':''}">${s.t}</div>
+    <div style="font-size:11.5px;color:var(--muted);line-height:1.35">${s.d}</div></div>`;
   return `<div class="card" style="border-left:3px solid var(--gold)">
-    <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">👋 Bienvenue — par où commencer ?</h2><button class="cta ghost sm" onclick="dismissOnboarding()">Masquer</button></div>
-    <div class="hint" style="margin:6px 0 10px">Le parcours type dans le Cockpit. Chaque étape est cliquable. Tout se pilote ensuite depuis la <b>fiche client 360°</b>.</div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap">
-      ${step(1,"👥","Ajouter un client","Créez la fiche client (ou importez un audit R5).","closeAiChat&&closeAiChat();openClientForm()")}
-      ${step(2,"📝","Lancer un audit","Diffusez le formulaire d'audit et synchronisez les réponses.","setScreen('audit')")}
-      ${step(3,"🛡️","Générer un rapport IA","Un rapport d'audit cloisonné par client, à valider.","setScreen('reports')")}
-      ${step(4,"💰","Facturer / abonnement","Créez la mission/abonnement — Budget & CA se remplissent seuls.","setScreen('missions')")}
-    </div>
-    <div class="hint" style="margin-top:8px">💡 Ouvrez n'importe quel client (onglet Clients → clic sur la ligne) : sa fiche 360° regroupe scores, risques, recommandations et toutes les actions.</div></div>`;
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><h2 style="margin:0">👋 Prise en main — ${done}/${steps.length} étapes</h2><button class="cta ghost sm" onclick="dismissOnboarding()">Masquer</button></div>
+    <div style="height:7px;background:var(--line);border-radius:5px;overflow:hidden;margin:9px 0 12px"><div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--gold),#D9BE7E);transition:width .4s ease"></div></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">${steps.map(card).join("")}</div>
+    <div class="hint" style="margin-top:9px">💡 Ouvrez n'importe quel client (onglet Clients → clic sur la ligne) : sa fiche 360° regroupe scores, risques, recommandations et actions.</div></div>`;
 }
 function dismissOnboarding(){ DB.meta.onboardingDone=true; save(); renderDashboard(); toast("Guide masqué — réaffichable dans ⚙ Paramètres."); }
 function showOnboarding(){ DB.meta.onboardingDone=false; save(); closeModal(); setScreen("dashboard"); toast("Guide de démarrage réaffiché."); }
+/* Raccourcis clavier globaux (fluidité) : Ctrl/Cmd+K ou « / » = recherche · Échap = fermer. */
+function bsmKeydown(e){
+  const t=e.target, tag=(t&&t.tagName)||"", typing = tag==="INPUT"||tag==="TEXTAREA"||tag==="SELECT"||(t&&t.isContentEditable);
+  if((e.ctrlKey||e.metaKey) && (e.key==="k"||e.key==="K")){ e.preventDefault(); const s=document.getElementById("globalsearch"); if(s){ s.focus(); if(s.select) s.select(); } return; }
+  if(e.key==="Escape"){
+    const ov=document.querySelector(".overlay.show"); if(ov && typeof closeModal==="function"){ closeModal(); return; }
+    if(typeof closeTopMenu==="function") closeTopMenu();
+    const gs=document.getElementById("gs-results"); if(gs) gs.classList.remove("show");
+    return;
+  }
+  if(typing) return;
+  if(e.key==="/"){ const s=document.getElementById("globalsearch"); if(s){ e.preventDefault(); s.focus(); } }
+}
+if(!window.__bsmKeysBound){ document.addEventListener("keydown", bsmKeydown); window.__bsmKeysBound=true; }
 // Mini-courbe (sparkline) SVG pour enrichir un KPI.
 function sparkline(vals, color){
   vals=(vals||[]).map(v=>+v||0); if(vals.length<2) return "";
@@ -1410,6 +1433,57 @@ function kpiCard(screen, value, cls, label, icon, accent, spark){
   return '<div class="kpi clk" onclick="setScreen(\''+screen+'\')" style="border-top:3px solid '+(accent||'var(--gold)')+'">'
     +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px"><div class="v '+(cls||"")+'">'+value+'</div><span class="kpi-ic">'+(icon||"")+'</span></div>'
     +'<div class="l">'+label+'</div>'+(spark||"")+'</div>';
+}
+/* Bandeau exécutif : les priorités du jour, rangées par gravité, cliquables (vue « poste de pilotage »). */
+function dashPriorityBand(a, critR, lateR, missionsEC, upcoming){
+  const today=todayISO(); const pri=[];
+  if(a.solde<0) pri.push({sev:'d',ic:'⚖️',txt:'Trésorerie négative ('+fmtD(a.solde)+')',go:"setScreen('budget')"});
+  if(a.enRetard>0) pri.push({sev:'d',ic:'⏰',txt:fmtD(a.enRetard)+" en retard d'encaissement",go:"setScreen('ca')"});
+  if(critR.length) pri.push({sev:'d',ic:'⚠️',txt:critR.length+' risque'+(critR.length>1?'s':'')+' critique'+(critR.length>1?'s':'')+' ouvert'+(critR.length>1?'s':''),go:"setScreen('risks')"});
+  if(lateR.length) pri.push({sev:'w',ic:'✅',txt:lateR.length+' recommandation'+(lateR.length>1?'s':'')+' en retard',go:"setScreen('recos')"});
+  const missNoRisk=missionsEC.filter(m=>!DB.risks.some(r=>r.missionId===m.id));
+  if(missNoRisk.length) pri.push({sev:'w',ic:'🎯',txt:missNoRisk.length+' mission'+(missNoRisk.length>1?'s':'')+' sans risque identifié',go:"setScreen('missions')"});
+  const todayEv=upcoming.filter(e=>e.date===today);
+  if(todayEv.length) pri.push({sev:'i',ic:'📅',txt:todayEv.length+' rendez-vous aujourd'+"'"+'hui',go:"setScreen('agenda')"});
+  const order={d:0,w:1,i:2}; pri.sort((x,y)=>order[x.sev]-order[y.sev]);
+  const col={d:'#E8837E',w:'#E0A93B',i:'#8FB4E0'};
+  const chips=pri.slice(0,6).map(p=>`<span onclick="${p.go}" style="cursor:pointer;display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);border-left:3px solid ${col[p.sev]};border-radius:10px;padding:8px 13px;font-size:13px;color:#fff;transition:background .13s ease" onmouseover="this.style.background='rgba(255,255,255,.14)'" onmouseout="this.style.background='rgba(255,255,255,.07)'">${p.ic} ${esc(p.txt)}</span>`).join("");
+  return `<div style="background:linear-gradient(135deg,#143253,#0D2137);border-radius:16px;padding:18px 20px;margin-bottom:18px;box-shadow:var(--sh-card)">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:${pri.length?'13':'2'}px">
+      <span style="font-family:var(--serif);font-size:21px;color:#fff;font-weight:600">Priorités du jour</span>
+      <span style="color:var(--gold);font-size:12px;letter-spacing:.05em">${frLong?frLong(today):frDate(today)}</span></div>
+    ${pri.length? `<div style="display:flex;gap:10px;flex-wrap:wrap">${chips}</div>` : `<div style="color:rgba(255,255,255,.78);font-size:13.5px">Tout est sous contrôle ✅ — aucune action urgente. Belle journée !</div>`}
+  </div>`;
+}
+/* IA proactive : synthèse stratégique du portefeuille, mise en cache par jour, actualisable (jamais d'appel auto = coût maîtrisé). */
+function dashAIBriefingCard(){
+  const has=(typeof aiProviderConf==="function") ? !!aiProviderConf() : !!DB.meta.mistralKey;
+  if(!has){
+    return `<div class="card" style="border-left:3px solid var(--gold)">
+      <h2 style="margin:0">🔮 Éclairage IA</h2>
+      <div class="hint" style="margin-top:6px">Obtenez une <b>synthèse stratégique</b> de votre portefeuille en un clic (CA, risques, recommandations, alertes). Activez-la en renseignant votre clé IA.
+        <div style="margin-top:10px"><button class="cta ghost sm" onclick="openSettings()">⚙ Configurer la clé IA</button></div></div></div>`;
+  }
+  const b=DB.meta.aiBriefing; const stale = b && b.date!==todayISO();
+  return `<div class="card" style="border-left:3px solid var(--gold)">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <h2 style="margin:0">🔮 Éclairage IA — synthèse du portefeuille</h2>
+      <button class="cta ghost sm" onclick="dashGenBriefing()">${b?'↻ Actualiser':'✦ Générer la synthèse'}</button></div>
+    <div id="dash-briefing" style="margin-top:10px">
+      ${b? `<div class="ai-md" style="font-size:13px;line-height:1.6">${mdToHtml(b.text)}</div>
+        <div class="hint" style="margin-top:8px">Généré ${frDate(b.date)}${b.time?" à "+b.time:""}${b.model?" · "+esc(b.model):""}${stale?' · <span style="color:var(--orange)">à actualiser</span>':''}</div>`
+      : `<div class="empty">Aucune synthèse encore. Cliquez « ✦ Générer la synthèse » pour une lecture stratégique de votre portefeuille.</div>`}
+    </div></div>`;
+}
+async function dashGenBriefing(){
+  const box=document.getElementById("dash-briefing"); if(box) box.innerHTML=aiSkeleton();
+  try{
+    const sys="Tu es le conseiller stratégique de la direction de BSM Advisory & Consulting (méthode R5, Madagascar). À partir de l'état du portefeuille et des alertes, rédige une synthèse exécutive TRÈS concise : 3 à 4 constats clés (chiffrés quand c'est possible), puis LA priorité du jour. Format markdown : puces courtes ; termine par une ligne « **Priorité du jour :** … ». Pas de préambule ni de conclusion.";
+    const text=await aiChat(sys, "État du portefeuille :\n"+buildAIContext(), 700, "briefing");
+    const now=new Date(); const conf=(typeof aiProviderConf==="function")?aiProviderConf():null;
+    DB.meta.aiBriefing={ text, date:todayISO(), time:now.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}), model:conf?conf.model:"" };
+    save(); renderDashboard(); toast("Synthèse IA générée ✅");
+  }catch(e){ if(box) box.innerHTML=`<div class="imp-err">⚠ ${esc(e.message||"Erreur IA")}</div>`; }
 }
 function renderDashboard(){
   const a=agg();
@@ -1463,6 +1537,7 @@ function renderDashboard(){
   document.getElementById("scr-dashboard").innerHTML = `
     <div class="pagetitle"><div><h1>Tableau de bord</h1></div>
       <div style="display:flex;gap:8px">${can("analyses")?`<button class="cta ghost" onclick="printPortfolioReport()">🖨 Rapport</button>`:""}</div></div>
+    ${dashPriorityBand(a, critR, lateR, missionsEC, upcoming)}
     ${onboardingCardHtml()}
     ${qa?`<div class="card" style="padding:10px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span style="font-size:11px;color:var(--muted);letter-spacing:.04em">ACTIONS RAPIDES</span>${qa}</div>`:""}
     ${validationPanelHtml(true)}
@@ -1478,6 +1553,7 @@ function renderDashboard(){
       ${kpiCard('recos',lateR.length,lateR.length>0?'warn':'','Recommandations en retard →','✅',lateR.length>0?'var(--orange)':'var(--green)','')}
       ${kpiCard('clients',DB.clients.length,'','Clients au portefeuille →','👥','var(--navy)','')}
     </div>
+    ${dashAIBriefingCard()}
     <div class="grid2 wide">
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">🔔 Notifications & activité récente${unread?` <span class="badge b-red">${unread} nouveau${unread>1?"x":""}</span>`:""}</h2>
@@ -5400,10 +5476,145 @@ function a1ClientPicker(){
     <option value="">👥 Tous les clients</option>
     ${DB.clients.map(c=>`<option value="${c.id}" ${a1Client===c.id?'selected':''}>${esc(c.company)}</option>`).join("")}</select>`;
 }
+/* ======================= A1 — Prix carburant modulables & moteur de diagnostic déterministe ======================= */
+function a1FuelPrice(type){ const f=DB.meta.fuelPrices||{}; const t=norm(type||""); if(t.indexOf("essence")>=0||t.indexOf("super")>=0) return +f.essence||0; if(t.indexOf("gaz")>=0) return +f.gaz||+f.gasoil||0; return +f.gasoil||0; }
+function a1LogCost(l, fuelType){ const liters=+l.liters||0; const unit=(+l.unitPrice>0)?+l.unitPrice:a1FuelPrice(fuelType); if(unit>0) return liters*unit; return toDefault(+l.cost||0, l.currency||DB.meta.defaultCurrency); }
+function openFuelPrices(){
+  const f=DB.meta.fuelPrices||{};
+  openModal(`<span class="close" onclick="closeModal()">✕</span><h2>⛽ Prix des carburants</h2>
+    <div class="msub">Modifiables à tout moment. Appliqués automatiquement selon le carburant de chaque véhicule / groupe — <b>recalcule tous les coûts</b>. En ${curName(DB.meta.defaultCurrency)} par litre.</div>
+    <div class="field row2"><label>Gasoil (diesel) & Essence — prix / litre</label>
+      <input type="number" step="0.01" id="fp-gasoil" value="${f.gasoil!=null?f.gasoil:''}" placeholder="Gasoil / L"><input type="number" step="0.01" id="fp-essence" value="${f.essence!=null?f.essence:''}" placeholder="Essence / L"></div>
+    <div class="hint">Tu peux aussi saisir un prix spécifique sur un relevé précis (il l'emporte sur cette table).</div>
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="saveFuelPrices()">Enregistrer</button></div>`);
+}
+function saveFuelPrices(){ DB.meta.fuelPrices={ gasoil:parseFloat(val("fp-gasoil"))||0, essence:parseFloat(val("fp-essence"))||0 }; save(); closeModal(); a1RefreshCurrent(); toast("Prix carburant enregistrés — coûts recalculés."); }
+const A1_CAUSES={ mecanique:{label:"Mécanique / usure",ic:"🔧",col:"#B7891A"}, conduite:{label:"Conduite / exploitation",ic:"🚗",col:"#2563EB"}, exploitation:{label:"Exploitation / charge",ic:"⚙️",col:"#2563EB"}, vol:{label:"Détournement probable",ic:"🚨",col:"#C0392B"}, perte:{label:"Perte / usage non justifié",ic:"⚠️",col:"#D97706"}, ras:{label:"Rien à signaler",ic:"✅",col:"#2F855A"} };
+const A1_RECOS={
+  mecanique:["Programmer une révision (injecteurs, filtres air/gasoil, bougies).","Contrôler pression et usure des pneus (sous-gonflage = surconso).","Vérifier l'encrassement moteur et la périodicité de vidange.","Diagnostic atelier si la dérive persiste après entretien."],
+  conduite:["Former à l'éco-conduite (anticipation, régime moteur).","Réduire le ralenti prolongé (coupure moteur à l'arrêt).","Adapter l'affectation du véhicule à son usage réel.","Fixer un objectif de conso par chauffeur + suivi mensuel."],
+  vol:["Cartes carburant nominatives (1 carte = 1 véhicule/chauffeur).","Rapprocher bons de carburant, tickets station et relevés compteur.","Recouper pleins et déplacements via GPS / jauge à distance.","Contrôler capacité réservoir vs volumes facturés ; auditer la station.","Double contrôle des pleins (signature d'un responsable)."],
+  perte:["Cadrer trajets autorisés (périmètre, horaires) et les tracer.","Formaliser une charte d'utilisation ; proscrire l'usage personnel non déclaré.","Analyser les km/heures hors mission et refacturer si nécessaire."]
+};
+const A1_RECOS_GEN={
+  mecanique:["Révision moteur (injecteurs, filtres, huile) ; contrôle du rendement.","Vérifier alternateur et réglages de régulation.","Maintenance préventive planifiée selon les heures moteur."],
+  exploitation:["Redimensionner le groupe à la charge réelle (sous-charge = surconso).","Regrouper les usages pour tourner à charge optimale.","Envisager un groupe plus petit pour les faibles charges."],
+  vol:["Jauge et compteur horaire scellés ; relevés contradictoires.","Rapprocher bons de carburant et heures de fonctionnement.","Contrôler capacité réservoir vs volumes livrés ; auditer le fournisseur.","Double signature à chaque plein."],
+  perte:["Cadrer les créneaux de fonctionnement autorisés.","Traquer les heures sans production (kWh) associée.","Registre de marche signé."]
+};
+function a1RecosFor(cause, kind){ const src=(kind==="gen")?A1_RECOS_GEN:A1_RECOS; return src[cause]||[]; }
+function a1Trend(series){ const v=series.filter(x=>x>0); if(v.length<3) return "stable";
+  const sorted=[...v].sort((a,b)=>a-b); const med=sorted[Math.floor(sorted.length/2)]||0; const mx=Math.max(...v);
+  const above=v.filter(x=>x>med*1.3).length;
+  if(med>0 && mx>med*1.6 && above<=Math.max(1,Math.round(v.length*0.34))) return "ponctuelle";
+  const third=Math.max(1,Math.floor(v.length/3)); const first=v.slice(0,third), last=v.slice(-third);
+  const avg=a=>a.reduce((s,x)=>s+x,0)/a.length;
+  if(avg(last)>avg(first)*1.15) return "progressive";
+  return "stable";
+}
+function a1DiagFinalize(causes, flags, trend, loss, excess, drift){
+  const list=Object.keys(causes).map(k=>({key:k,score:Math.min(100,Math.round(causes[k]))})).filter(c=>c.score>0).sort((a,b)=>b.score-a.score);
+  const top = list.length? list[0] : {key:"ras",score:0};
+  return { causes:list, top, fraudScore:Math.min(100,Math.round(causes.vol||0)), flags, trend, loss, excess, drift };
+}
+function a1DiagFleet(p, fleetConso){
+  const flags=[], causes={mecanique:0,conduite:0,vol:0,perte:0};
+  const price=a1FuelPrice(p.v.motorisation), reservoir=+p.v.reservoir||0;
+  let excess=0; const expBase=(p.consoTheo>0?p.consoTheo:fleetConso);
+  if(expBase>0 && p.km>0){ excess=Math.max(0,p.liters-(expBase/100*p.km)); }
+  const loss=(price>0)?excess*price:0;
+  // Plausibilité PAR RELEVÉ (agnostique à la granularité, attrape les pics isolés) : litres > consommable sur ce relevé (conso généreuse + 1 réservoir).
+  (p.logs||[]).forEach(l=>{ const lt=+l.liters||0, km=+l.km||0;
+    const maxP=(km>0)?(Math.max((p.consoTheo>0?p.consoTheo*1.5:0),30)/100*km + (reservoir>0?reservoir:0)):0;
+    if(maxP>0 && km>30 && lt>maxP) flags.push({sev:"d",txt:`${Math.round(lt)} L excédentaires pour ${Math.round(km)} km le ${frDate(l.date)} (max plausible ~${Math.round(maxP)} L)`});
+    if(lt>=5 && km<2) flags.push({sev:"d",txt:`${Math.round(lt)} L pris sans déplacement (${km} km) le ${frDate(l.date)}`});
+    if(l.cost>0 && lt>0 && price>0){ const u=toDefault(+l.cost,l.currency||DB.meta.defaultCurrency)/lt; if(u>price*1.2) flags.push({sev:"w",txt:`Coût/L ${fmtD(u)} > marché ${fmtD(price)} le ${frDate(l.date)}`}); }
+  });
+  const hardFraud=flags.some(f=>f.sev==="d");
+  const trend=a1Trend((p.logs||[]).filter(l=>(+l.km||0)>0).map(l=>(+l.liters||0)/(+l.km||1)*100));
+  const drift=p.driftTheo!=null?p.driftTheo:(fleetConso>0&&p.consoL100>0?(p.consoL100/fleetConso-1)*100:0);
+  if(drift>10 && trend==="progressive") causes.mecanique+=40;
+  if(drift>10) causes.mecanique+=15; if(p.age!=null&&p.age>=6) causes.mecanique+=20;
+  if(p.idleRatio>35) causes.conduite+=40;
+  if(drift>10 && trend!=="ponctuelle" && !hardFraud) causes.conduite+=20;
+  if(norm(p.v.usage||"").indexOf("urbain")>=0) causes.conduite+=10;
+  if(hardFraud) causes.vol+=55;
+  if(trend==="ponctuelle" && drift>15) causes.vol+=25;
+  if(flags.some(f=>/Coût\/L/.test(f.txt))) causes.vol+=20;
+  if(drift>40) causes.vol+=10;
+  if(p.idleRatio>50) causes.perte+=25;
+  if(hardFraud) causes.mecanique=Math.max(0,causes.mecanique-15);
+  return a1DiagFinalize(causes, flags, trend, loss, excess, drift);
+}
+function a1DiagGen(p){
+  const flags=[], causes={mecanique:0,exploitation:0,vol:0,perte:0};
+  const price=a1FuelPrice(p.g.carburant), reservoir=+p.g.reservoirL||0;
+  let excess=0; if(p.expLiters>0) excess=Math.max(0,p.liters-p.expLiters); else if(p.expectedLh>0) excess=Math.max(0,p.liters-p.expectedLh*p.hours);
+  const loss=(price>0)?excess*price:0;
+  (p.logs||[]).forEach(l=>{ const lt=+l.liters||0, h=+l.hours||0;
+    const maxP=(h>0 && p.consoTheo>0)?(p.consoTheo*1.5*h + (reservoir>0?reservoir:0)):0;
+    if(maxP>0 && h>1 && lt>maxP) flags.push({sev:"d",txt:`${Math.round(lt)} L excédentaires pour ${Math.round(h)} h le ${frDate(l.date)} (max plausible ~${Math.round(maxP)} L)`});
+    if(lt>=5 && h<0.5) flags.push({sev:"d",txt:`${Math.round(lt)} L sans fonctionnement (${h} h) le ${frDate(l.date)}`});
+    if(l.cost>0 && lt>0 && price>0){ const u=toDefault(+l.cost,l.currency||DB.meta.defaultCurrency)/lt; if(u>price*1.2) flags.push({sev:"w",txt:`Coût/L ${fmtD(u)} > marché ${fmtD(price)} le ${frDate(l.date)}`}); }
+  });
+  if(p.rendement>6.5) flags.push({sev:"w",txt:`Rendement ${p.rendement.toFixed(2)} kWh/L peu plausible (vérifier le compteur)`});
+  const hardFraud=flags.some(f=>f.sev==="d");
+  const trend=a1Trend((p.logs||[]).filter(l=>(+l.hours||0)>0).map(l=>(+l.liters||0)/(+l.hours||1)));
+  const drift=p.driftLh!=null?p.driftLh:0;
+  if(drift>15 && trend==="progressive") causes.mecanique+=40;
+  if(drift>15) causes.mecanique+=15; if(p.age!=null&&p.age>=7) causes.mecanique+=20;
+  if(p.lowLoad) causes.exploitation+=45;
+  if(hardFraud) causes.vol+=55;
+  if(trend==="ponctuelle" && drift>20) causes.vol+=25;
+  if(flags.some(f=>/Coût\/L/.test(f.txt))) causes.vol+=20;
+  if(drift>60) causes.vol+=10;
+  if(hardFraud) causes.mecanique=Math.max(0,causes.mecanique-15);
+  return a1DiagFinalize(causes, flags, trend, loss, excess, drift);
+}
+function a1CauseBadge(diag){ if(!diag) return ""; const c=A1_CAUSES[diag.top.key]||A1_CAUSES.ras;
+  const showFraud = diag.fraudScore>=35 && diag.top.key!=="vol";
+  return `<span class="badge" style="background:${c.col};color:#fff" title="Cause probable (score ${diag.top.score})">${c.ic} ${c.label}</span>${showFraud?` <span class="badge b-red" title="Score de risque de détournement">🚨 ${diag.fraudScore}</span>`:""}`;
+}
+function openA1Diag(kind, id){
+  const isGen=kind==="gen";
+  const all=(isGen?a1GenCompute(""):a1Compute("")).arr;
+  const p=all.find(x=>(isGen?x.g.id:x.v.id)===id); if(!p){ toast("Introuvable."); return; }
+  const name=isGen?p.g.name:p.v.name, machine=isGen?p.g:p.v, verdict=machine.verdict||null;
+  const d=p.diag||{causes:[],flags:[],top:{key:"ras",score:0},fraudScore:0,trend:"stable",loss:0,excess:0,drift:0};
+  const causesHtml=(d.causes.length?d.causes:[{key:"ras",score:0}]).map(c=>{ const m=A1_CAUSES[c.key]||A1_CAUSES.ras;
+    return `<div class="li"><span>${m.ic} ${m.label}</span><span style="display:flex;align-items:center;gap:8px"><span style="display:inline-block;height:7px;width:${Math.min(120,Math.round(c.score))}px;background:${m.col};border-radius:4px"></span><b>${c.score}</b></span></div>`; }).join("");
+  const flagsHtml=d.flags.length? `<ul style="margin:6px 0 0 16px;line-height:1.6">`+d.flags.map(f=>`<li style="color:${f.sev==='d'?'var(--red)':'var(--orange)'}">${esc(f.txt)}</li>`).join("")+`</ul>` : `<div class="hint">Aucune incohérence physique détectée.</div>`;
+  const topCause=d.top.key==="ras"?null:d.top.key;
+  const recos=topCause?a1RecosFor(topCause, isGen?"gen":"fleet"):[];
+  const trendTxt={progressive:"progressive (évoque une usure mécanique)",ponctuelle:"brutale / ponctuelle (évoque une anomalie ou un détournement)",stable:"stable"}[d.trend]||d.trend;
+  openModal(`<span class="close" onclick="closeModal()">✕</span><h2>🔬 Diagnostic — ${esc(name)}</h2>
+    <div class="msub">Analyse déterministe (règles BSM), indépendante de l'IA. Vous tranchez en bas (jugement d'expert).</div>
+    <div class="grid2" style="gap:14px">
+      <div><h2 style="font-size:14px;margin:4px 0">Causes probables</h2><div class="mini-list">${causesHtml}</div>
+        <div class="hint" style="margin-top:6px">Tendance : <b>${trendTxt}</b>${d.drift?` · dérive ${d.drift>0?'+':''}${d.drift.toFixed(0)}%`:""}.</div></div>
+      <div><h2 style="font-size:14px;margin:4px 0">Signaux physiques</h2>${flagsHtml}
+        ${d.loss>0?`<div class="hint" style="margin-top:8px;color:var(--red)"><b>Impact financier estimé :</b> ${fmtD(d.loss)} (${Math.round(d.excess)} L de surconsommation).</div>`:""}
+        ${d.fraudScore>=35?`<div class="hint" style="margin-top:4px"><b>Risque de détournement :</b> ${d.fraudScore}/100.</div>`:""}</div>
+    </div>
+    ${recos.length?`<h2 style="font-size:14px;margin:12px 0 4px">Orientations recommandées — ${A1_CAUSES[topCause].label}</h2><ul style="margin:0 0 0 16px;line-height:1.6">${recos.map(r=>`<li>${esc(r)}</li>`).join("")}</ul>`:""}
+    <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
+    <h2 style="font-size:14px;margin:0 0 6px">✔ Votre conclusion</h2>
+    <div class="field row2"><label>Cause retenue & statut</label>
+      <select id="vd-cause"><option value="">— À investiguer —</option>${Object.keys(A1_CAUSES).filter(k=>k!=="ras").map(k=>`<option value="${k}" ${verdict&&verdict.cause===k?'selected':''}>${A1_CAUSES[k].ic} ${A1_CAUSES[k].label}</option>`).join("")}</select>
+      <select id="vd-status"><option value="suspecte" ${verdict&&verdict.status==="suspecte"?'selected':''}>Suspecté</option><option value="confirme" ${verdict&&verdict.status==="confirme"?'selected':''}>Confirmé</option><option value="ecarte" ${verdict&&verdict.status==="ecarte"?'selected':''}>Écarté</option></select></div>
+    <div class="field"><label>Note / constat (repris dans le rapport)</label><textarea id="vd-note" rows="3" style="width:100%;font-family:inherit;padding:8px;border:1px solid var(--line);border-radius:8px">${esc(verdict?(verdict.note||""):"")}</textarea></div>
+    <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Fermer</button><button class="cta" onclick="saveA1Verdict('${kind}','${id}')">Enregistrer la conclusion</button></div>`);
+}
+function saveA1Verdict(kind, id){
+  const arr=(kind==="gen")?DB.a1gensets:DB.a1vehicles; const m=arr.find(x=>x.id===id); if(!m) return;
+  const cause=val("vd-cause"), note=val("vd-note"), status=val("vd-status");
+  if(!cause && !(note||"").trim()){ delete m.verdict; } else { m.verdict={cause, status, note, by:(currentUser&&currentUser.login)||"", date:todayISO()}; }
+  save(); closeModal(); a1RefreshCurrent(); toast("Conclusion enregistrée.");
+}
 function a1Compute(clientId){
   const perV={};
-  DB.a1vehicles.filter(v=>!clientId||v.clientId===clientId).forEach(v=>{ perV[v.id]={v, km:0, liters:0, cost:0, hours:0, idle:0, n:0}; });
-  DB.a1logs.forEach(l=>{ const p=perV[l.vehicleId]; if(!p) return; p.km+=(+l.km||0); p.liters+=(+l.liters||0); p.cost+=toDefault(+l.cost||0,l.currency||DB.meta.defaultCurrency); p.hours+=(+l.hours||0); p.idle+=(+l.idle||0); p.n++; });
+  DB.a1vehicles.filter(v=>!clientId||v.clientId===clientId).forEach(v=>{ perV[v.id]={v, km:0, liters:0, cost:0, hours:0, idle:0, n:0, logs:[]}; });
+  DB.a1logs.forEach(l=>{ const p=perV[l.vehicleId]; if(!p) return; p.km+=(+l.km||0); p.liters+=(+l.liters||0); p.cost+=a1LogCost(l, p.v.motorisation); p.hours+=(+l.hours||0); p.idle+=(+l.idle||0); p.logs.push(l); p.n++; });
   const yr=new Date().getFullYear();
   const arr=Object.values(perV).map(p=>{ p.consoL100=p.km>0?p.liters/p.km*100:0; p.costPerKm=p.km>0?p.cost/p.km:0; p.costPerL=p.liters>0?p.cost/p.liters:0;
     // Données machine (constructeur) → dérive vs réel, âge, ratio ralenti
@@ -5417,6 +5628,7 @@ function a1Compute(clientId){
   // Anomalie = surconso vs constructeur (>15%) OU, à défaut de donnée constructeur, vs moyenne flotte (>20%)
   arr.forEach(p=>{ p.anomaly = p.km>0 && ( (p.consoTheo>0 && p.consoL100 > p.consoTheo*1.15) || (p.consoTheo<=0 && fleetConso>0 && p.consoL100 > fleetConso*1.2) );
     p.idleFlag = p.idleRatio>35; }); // ralenti excessif (>35% du temps moteur)
+  arr.forEach(p=>{ p.logs.sort((x,y)=>String(x.date||"").localeCompare(String(y.date||""))); p.diag=a1DiagFleet(p, fleetConso); }); // diagnostic déterministe (cause probable, fraude, impact €)
   const totals={ km:arr.reduce((s,p)=>s+p.km,0), liters:arr.reduce((s,p)=>s+p.liters,0), cost:arr.reduce((s,p)=>s+p.cost,0) };
   totals.consoL100 = totals.km>0? totals.liters/totals.km*100:0;
   totals.costPerKm = totals.km>0? totals.cost/totals.km:0;
@@ -5429,18 +5641,19 @@ function renderA1Fleet(){
   const maxCpk=Math.max(1,...withKm.map(p=>p.costPerKm));
   const rows=arr.sort((a,b)=>b.consoL100-a.consoL100).map(p=>`
     <tr>
-      <td><b>${esc(p.v.name)}</b><div style="font-size:11px;color:var(--muted)">${esc(p.v.type||"")}${p.v.plate?" · "+esc(p.v.plate):""}${a1VehClientName(p.v)?" · "+esc(a1VehClientName(p.v)):""}</div></td>
+      <td><b>${esc(p.v.name)}</b><div style="font-size:11px;color:var(--muted)">${esc(p.v.type||"")}${p.v.plate?" · "+esc(p.v.plate):""}${a1VehClientName(p.v)?" · "+esc(a1VehClientName(p.v)):""}</div>${p.diag&&p.diag.top.key!=="ras"?`<div style="margin-top:3px">${a1CauseBadge(p.diag)}</div>`:""}${p.v.verdict&&p.v.verdict.cause?`<div style="margin-top:2px;font-size:10px;color:var(--muted)">✔ ${A1_CAUSES[p.v.verdict.cause]?A1_CAUSES[p.v.verdict.cause].label:''} (${esc(p.v.verdict.status||'')})</div>`:""}</td>
       <td style="text-align:right">${p.km.toLocaleString('fr-FR')} km</td>
       <td style="text-align:right">${Math.round(p.liters).toLocaleString('fr-FR')} L</td>
       <td style="text-align:right;font-weight:600;${p.anomaly?'color:var(--red)':''}">${p.consoL100?p.consoL100.toFixed(1)+" L/100":"—"}${p.anomaly?' ⚠️':''}${p.driftTheo!=null?`<div style="font-size:10px;font-weight:400;color:${p.driftTheo>15?'var(--red)':p.driftTheo>0?'var(--amber)':'var(--green)'}">vs constr. ${p.driftTheo>0?'+':''}${p.driftTheo.toFixed(0)}%</div>`:""}</td>
       <td style="text-align:right">${p.costPerKm?fmtD(p.costPerKm):"—"}</td>
       <td style="text-align:right">${fmtD(p.cost)}</td>
-      <td><div class="rowact"><button class="iconbtn" title="Relevés" onclick="openA1LogList('${p.v.id}')">📄</button><button class="iconbtn" onclick="openA1Vehicle('${p.v.id}')">✎</button><button class="iconbtn del" onclick="deleteA1Vehicle('${p.v.id}')">🗑</button></div></td>
+      <td><div class="rowact"><button class="iconbtn" title="Diagnostic" onclick="openA1Diag('fleet','${p.v.id}')">🔬</button><button class="iconbtn" title="Relevés" onclick="openA1LogList('${p.v.id}')">📄</button><button class="iconbtn" onclick="openA1Vehicle('${p.v.id}')">✎</button><button class="iconbtn del" onclick="deleteA1Vehicle('${p.v.id}')">🗑</button></div></td>
     </tr>`).join("");
   document.getElementById("scr-a1fleet").innerHTML=`
     <button class="backlink" onclick="setScreen('audit')">← Retour aux audits</button>
     <div class="pagetitle"><div><h1>🚗 A1 — Flotte & carburant + GPS</h1><div class="sub">Programme d'analyse — conso, coût au km, GPS, détection d'anomalies (prestation client)</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="cta ghost" onclick="openFuelPrices()">⛽ Prix carburant</button>
         <button class="cta ghost" onclick="openA1Import()">⇊ Importer CSV</button>
         <button class="cta ghost" onclick="openA1Vehicle()">+ Véhicule</button>
         <button class="cta ghost" onclick="openA1Log()">+ Relevé</button>
@@ -5455,6 +5668,7 @@ function renderA1Fleet(){
       <div class="kpi"><div class="v ${anomalies.length?'danger':''}">${anomalies.length}</div><div class="l">Véhicules en surconsommation</div></div>
     </div>
     ${anomalies.length?`<div class="card" style="border-left:3px solid var(--red)"><b>⚠️ Anomalies détectées :</b> ${anomalies.map(p=>esc(p.v.name)+" ("+p.consoL100.toFixed(1)+" L/100, +"+Math.round((p.consoL100/fleetConso-1)*100)+"% vs moyenne)").join(" · ")}. À vérifier : conduite, entretien, ou vol de carburant.</div>`:""}
+    ${(function(){const tl=arr.reduce((s,p)=>s+((p.diag&&p.diag.loss)||0),0);const fr=arr.filter(p=>p.diag&&p.diag.fraudScore>=35);return (tl>0||fr.length)?`<div class="card" style="border-left:3px solid var(--navy)">${tl>0?`<b>💸 Impact financier estimé (surconsommation) :</b> ${fmtD(tl)}. `:""}${fr.length?`<b style="color:var(--red)">🚨 ${fr.length} véhicule(s) à risque de détournement</b> (score ≥ 35) — ouvrez le 🔬 diagnostic pour la cause probable et les orientations.`:""}${tl<=0&&!DB.meta.fuelPrices.gasoil?` <span style="color:var(--muted)">Renseignez les <b>⛽ prix carburant</b> pour chiffrer l'impact.</span>`:""}</div>`:"";})()}
     <div class="grid2 wide">
       <div class="card"><h2>Coût au km par véhicule</h2>
         ${withKm.length?`<div class="mini-list">`+withKm.slice(0,10).map(p=>`<div class="li"><span>${esc(p.v.name)}</span><span style="display:flex;align-items:center;gap:8px"><span style="display:inline-block;height:8px;width:${Math.round(p.costPerKm/maxCpk*120)}px;background:${p.anomaly?'var(--red)':'var(--gold)'};border-radius:4px"></span><b>${fmtD(p.costPerKm)}</b></span></div>`).join("")+`</div>`:`<div class="empty">Aucune donnée. Importez un CSV ou ajoutez des relevés.</div>`}
@@ -5506,15 +5720,19 @@ function openA1Log(id, vehicleId){
       <input type="date" id="l-date" value="${l.date||todayISO()}"></div>
     <div class="field row2"><label>Km parcourus & litres</label>
       <input type="number" id="l-km" value="${l.km!=null?l.km:''}" placeholder="km"><input type="number" id="l-liters" value="${l.liters!=null?l.liters:''}" placeholder="litres"></div>
-    <div class="field row2"><label>Coût carburant & devise</label>
-      <input type="number" id="l-cost" value="${l.cost!=null?l.cost:''}"><select id="l-cur">${curOptions(l.currency)}</select></div>
+    <div class="field row2"><label>Coût carburant total (option) & prix/litre spécifique (option)</label>
+      <input type="number" id="l-cost" value="${l.cost!=null?l.cost:''}" placeholder="coût total"><input type="number" step="0.01" id="l-unit" value="${l.unitPrice!=null?l.unitPrice:''}" placeholder="prix/L (sinon table ⛽)"></div>
     <div class="field row2"><label>Heures moteur & ralenti (GPS, option)</label>
       <input type="number" id="l-hours" value="${l.hours!=null?l.hours:''}" placeholder="heures"><input type="number" id="l-idle" value="${l.idle!=null?l.idle:''}" placeholder="ralenti (h)"></div>
+    <div class="field"><label>Traçabilité (option — pour cibler une anomalie)</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><input id="l-driver" value="${esc(l.driver||'')}" placeholder="Chauffeur" style="flex:1;min-width:110px;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px"><input id="l-site" value="${esc(l.site||'')}" placeholder="Site" style="flex:1;min-width:90px;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px"><input id="l-station" value="${esc(l.station||'')}" placeholder="Station" style="flex:1;min-width:90px;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px"></div></div>
+    <div class="field"><label>Devise du coût</label><select id="l-cur">${curOptions(l.currency)}</select></div>
     <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="saveA1Log('${id||''}')">Enregistrer</button></div>`);
 }
 function saveA1Log(id){
   const obj={ vehicleId:val("l-veh"), date:val("l-date")||todayISO(), km:parseFloat(val("l-km"))||0, liters:parseFloat(val("l-liters"))||0,
-    cost:parseFloat(val("l-cost"))||0, currency:val("l-cur"), hours:parseFloat(val("l-hours"))||0, idle:parseFloat(val("l-idle"))||0 };
+    cost:parseFloat(val("l-cost"))||0, unitPrice:parseFloat(val("l-unit"))||0, currency:val("l-cur"), hours:parseFloat(val("l-hours"))||0, idle:parseFloat(val("l-idle"))||0,
+    driver:(val("l-driver")||"").trim(), site:(val("l-site")||"").trim(), station:(val("l-station")||"").trim() };
   if(!obj.vehicleId){ toast("Sélectionnez un véhicule."); return; }
   if(id){ Object.assign(DB.a1logs.find(x=>x.id===id),obj); } else { obj.id=uid(); DB.a1logs.push(obj); }
   save(); closeModal(); renderA1Fleet(); toast("Relevé enregistré.");
@@ -5565,8 +5783,8 @@ function runA1Import(){
 function buildA1Context(){
   const {arr, fleetConso, totals}=a1Compute();
   let t=`Analyse de flotte (méthode BSM). Devise ${DB.meta.defaultCurrency}. Conso moyenne flotte ${fleetConso.toFixed(1)} L/100 km. Total ${totals.km.toLocaleString('fr-FR')} km, ${Math.round(totals.liters)} L, coût carburant ${fmtD(totals.cost)}, coût moyen ${fmtD(totals.costPerKm)}/km.\nVéhicules :\n`;
-  arr.forEach(p=>{ t+=`- ${p.v.name} (${[p.v.type,p.v.marque,p.v.modele].filter(Boolean).join(" ")||"?"}${p.v.motorisation?", "+p.v.motorisation:""}${p.age!=null?", "+p.age+" ans":""}${p.v.usage?", usage "+p.v.usage:""}) : ${p.km.toLocaleString('fr-FR')} km, ${Math.round(p.liters)} L, conso réelle ${p.consoL100?p.consoL100.toFixed(1):"?"} L/100${p.consoTheo?` (constructeur ${p.consoTheo} → dérive ${p.driftTheo>0?"+":""}${p.driftTheo!=null?p.driftTheo.toFixed(0):"?"}%)`:""}, ${fmtD(p.costPerKm)}/km${p.hours?`, ${Math.round(p.hours)} h moteur`:""}${p.idle?`, ${Math.round(p.idle)} h ralenti (${p.idleRatio.toFixed(0)}%)`:""}${p.anomaly?" [SURCONSOMMATION]":""}${p.idleFlag?" [RALENTI EXCESSIF]":""}.\n`; });
-  t+="\nInterprète les DÉRIVES vs conso constructeur (un écart positif fort = usure moteur, sous-gonflage, conduite, ou détournement de carburant) et le ralenti excessif. Distingue une dérive explicable par l'âge/l'usage d'une anomalie à investiguer.";
+  arr.forEach(p=>{ t+=`- ${p.v.name} (${[p.v.type,p.v.marque,p.v.modele].filter(Boolean).join(" ")||"?"}${p.v.motorisation?", "+p.v.motorisation:""}${p.age!=null?", "+p.age+" ans":""}${p.v.usage?", usage "+p.v.usage:""}) : ${p.km.toLocaleString('fr-FR')} km, ${Math.round(p.liters)} L, conso réelle ${p.consoL100?p.consoL100.toFixed(1):"?"} L/100${p.consoTheo?` (constructeur ${p.consoTheo} → dérive ${p.driftTheo>0?"+":""}${p.driftTheo!=null?p.driftTheo.toFixed(0):"?"}%)`:""}, ${fmtD(p.costPerKm)}/km${p.hours?`, ${Math.round(p.hours)} h moteur`:""}${p.idle?`, ${Math.round(p.idle)} h ralenti (${p.idleRatio.toFixed(0)}%)`:""}${p.anomaly?" [SURCONSOMMATION]":""}${p.idleFlag?" [RALENTI EXCESSIF]":""}${p.diag?" | DIAGNOSTIC BSM: "+((A1_CAUSES[p.diag.top.key]||{}).label||"")+" (score "+p.diag.top.score+", tendance "+p.diag.trend+")"+(p.diag.fraudScore>=35?", RISQUE DÉTOURNEMENT "+p.diag.fraudScore+"/100":"")+(p.diag.loss>0?", impact ~"+fmtD(p.diag.loss):"")+(p.diag.flags.length?" [signaux physiques: "+p.diag.flags.map(f=>f.txt).join(" ; ")+"]":""):""}${p.v.verdict?" | CONCLUSION AUDITEUR: "+((A1_CAUSES[p.v.verdict.cause]||{}).label||"à investiguer")+" ("+(p.v.verdict.status||"")+")"+(p.v.verdict.note?" - "+p.v.verdict.note:""):""}.\n`; });
+  t+="\nAppuie-toi sur le DIAGNOSTIC BSM (moteur déterministe) et respecte la conclusion de l'auditeur quand elle existe. Pour chaque anomalie, tranche entre : mécanique/usure, conduite/exploitation, détournement (vol), ou perte/usage non justifié — en justifiant par les signaux. Donne des orientations concrètes et l'impact financier.";
   return t.slice(0,6500);
 }
 async function a1Analyze(){
@@ -5578,6 +5796,17 @@ async function a1Analyze(){
     const el=document.getElementById("a1-ai"); if(el){ el.className=""; el.style.whiteSpace="pre-wrap"; el.style.fontSize="13px"; el.style.lineHeight="1.55"; el.textContent=txt; }
   }catch(e){ const el=document.getElementById("a1-ai"); if(el) el.innerHTML=`<span style="color:var(--red)">${esc(e.message||"Erreur IA")}. Vérifiez la clé Mistral dans ⚙ Paramètres.</span>`; }
 }
+function a1DiagReportSection(arr, kind){
+  const flagged=arr.filter(p=>{ const m=kind==="gen"?p.g:p.v; const d=p.diag; return (d&&(d.top.key!=="ras"||d.flags.length||d.loss>0))||m.verdict; });
+  if(!flagged.length) return "";
+  const rows=flagged.map(p=>{ const m=kind==="gen"?p.g:p.v; const d=p.diag||{top:{key:"ras",score:0},flags:[],loss:0,fraudScore:0};
+    const v=m.verdict; const causeKey=(v&&v.cause)||d.top.key; const cause=A1_CAUSES[causeKey]||A1_CAUSES.ras;
+    const reco=(causeKey!=="ras")?(a1RecosFor(causeKey, kind==="gen"?"gen":"fleet")[0]||""):"";
+    return `<tr><td><b>${esc(m.name)}</b></td><td>${cause.ic} ${cause.label}${v?" <i>("+esc(v.status||"")+", auditeur)</i>":""}${d.fraudScore>=35?` <b style="color:#C0392B">— risque détournement ${d.fraudScore}/100</b>`:""}</td><td style="text-align:right">${d.loss>0?fmtD(d.loss):"—"}</td><td>${esc((v&&v.note)||reco||"")}</td></tr>`;
+  }).join("");
+  return `<h2 style="margin-top:18px;font-size:15px">Diagnostic &amp; orientations</h2>
+    <table><tr><th>Machine</th><th>Cause probable / conclusion</th><th style="text-align:right">Impact estimé</th><th>Orientation recommandée</th></tr>${rows}</table>`;
+}
 function printA1Report(){
   const {arr, fleetConso, totals}=a1Compute();
   const body=arr.sort((a,b)=>b.consoL100-a.consoL100).map(p=>`<tr><td>${esc(p.v.name)} (${esc(p.v.type||"")})</td><td style="text-align:right">${p.km.toLocaleString('fr-FR')}</td><td style="text-align:right">${Math.round(p.liters)}</td><td style="text-align:right">${p.consoL100?p.consoL100.toFixed(1):"—"}</td><td style="text-align:right">${fmtD(p.costPerKm)}</td><td style="text-align:right">${fmtD(p.cost)}</td></tr>`).join("");
@@ -5587,6 +5816,7 @@ function printA1Report(){
     <p class="meta">Total : ${totals.km.toLocaleString('fr-FR')} km · ${Math.round(totals.liters)} L · coût carburant ${fmtD(totals.cost)} · conso moyenne ${totals.consoL100.toFixed(1)} L/100 km · coût moyen ${fmtD(totals.costPerKm)}/km.</p>
     ${anomalies.length?`<p class="meta"><b>Surconsommations :</b> ${anomalies.map(p=>esc(p.v.name)+" ("+p.consoL100.toFixed(1)+" L/100)").join(", ")}.</p>`:""}
     <table><tr><th>Véhicule</th><th style="text-align:right">Km</th><th style="text-align:right">Litres</th><th style="text-align:right">L/100</th><th style="text-align:right">Coût/km</th><th style="text-align:right">Coût total</th></tr>${body}</table>
+    ${a1DiagReportSection(arr,"fleet")}
     <p class="meta">Édité le ${frDate(todayISO())} — ${DB.meta.cabinetName||"BSM Advisory & Consulting"}.</p>
   </div>`;
   window.print();
@@ -5742,10 +5972,10 @@ function a1GenClientPicker(){
 function a1GenExpectedLh(consoTheoLh, chargePct){ if(!(consoTheoLh>0)) return 0; const c=(chargePct>0?chargePct:100)/100; return consoTheoLh*(0.30+0.70*c); }
 function a1GenCompute(clientId){
   const yr=new Date().getFullYear(); const perG={};
-  DB.a1gensets.filter(g=>!clientId||g.clientId===clientId).forEach(g=>{ perG[g.id]={g, hours:0, liters:0, kwh:0, cost:0, chW:0, jkwh:0, jkwhW:0, expL:0, gap:0, n:0}; });
+  DB.a1gensets.filter(g=>!clientId||g.clientId===clientId).forEach(g=>{ perG[g.id]={g, hours:0, liters:0, kwh:0, cost:0, chW:0, jkwh:0, jkwhW:0, expL:0, gap:0, n:0, logs:[]}; });
   DB.a1genlogs.forEach(l=>{ const p=perG[l.gensetId]; if(!p) return;
     const h=+l.hours||0; p.hours+=h; p.liters+=(+l.liters||0); p.kwh+=(+l.kwh||0);
-    p.cost+=toDefault(+l.cost||0,l.currency||DB.meta.defaultCurrency);
+    p.cost+=a1LogCost(l, p.g.carburant); p.logs.push(l);
     if(l.expectedLiters>0){ p.expL+=(+l.expectedLiters); } // conso attendue fournie (ex. tableau de bord importé)
     if(l.costGap){ p.gap+=toDefault(+l.costGap||0,l.currency||DB.meta.defaultCurrency); } // écart valorisé (Ar)
     if(l.chargePct>0){ p.chW+=(+l.chargePct)*(h||1); } // charge moyenne pondérée par les heures
@@ -5769,6 +5999,8 @@ function a1GenCompute(clientId){
     p.age = p.g.annee ? Math.max(0,yr-(+p.g.annee)) : null;
     p.anomaly = p.driftLh!=null && p.driftLh>20;           // surconso vs attendu → entretien / détournement
     p.lowLoad = p.chargePct>0 && p.chargePct<30;           // sous-charge → groupe surdimensionné, rendement dégradé
+    p.logs.sort((x,y)=>String(x.date||"").localeCompare(String(y.date||"")));
+    p.diag=a1DiagGen(p);                                    // diagnostic déterministe (cause probable, fraude, impact €)
     return p;
   });
   const totals={ hours:arr.reduce((s,p)=>s+p.hours,0), liters:arr.reduce((s,p)=>s+p.liters,0), kwh:arr.reduce((s,p)=>s+p.kwh,0), cost:arr.reduce((s,p)=>s+p.cost,0) };
@@ -5783,18 +6015,19 @@ function renderA1Genset(){
   const anomalies=arr.filter(p=>p.anomaly), lowLoads=arr.filter(p=>p.lowLoad);
   const rows=arr.sort((a,b)=>(b.driftLh||0)-(a.driftLh||0)).map(p=>`
     <tr>
-      <td><b>${esc(p.g.name)}</b><div style="font-size:11px;color:var(--muted)">${[p.g.puissanceKva?p.g.puissanceKva+" kVA":"",p.g.carburant,p.age!=null?p.age+" ans":""].filter(Boolean).join(" · ")}${a1GenClientName(p.g)?" · "+esc(a1GenClientName(p.g)):""}</div></td>
+      <td><b>${esc(p.g.name)}</b><div style="font-size:11px;color:var(--muted)">${[p.g.puissanceKva?p.g.puissanceKva+" kVA":"",p.g.carburant,p.age!=null?p.age+" ans":""].filter(Boolean).join(" · ")}${a1GenClientName(p.g)?" · "+esc(a1GenClientName(p.g)):""}</div>${p.diag&&p.diag.top.key!=="ras"?`<div style="margin-top:3px">${a1CauseBadge(p.diag)}</div>`:""}${p.g.verdict&&p.g.verdict.cause?`<div style="margin-top:2px;font-size:10px;color:var(--muted)">✔ ${A1_CAUSES[p.g.verdict.cause]?A1_CAUSES[p.g.verdict.cause].label:''} (${esc(p.g.verdict.status||'')})</div>`:""}</td>
       <td style="text-align:right">${p.hours?Math.round(p.hours).toLocaleString('fr-FR')+" h":"—"}</td>
       <td style="text-align:right">${p.kwh?Math.round(p.kwh).toLocaleString('fr-FR'):"—"}</td>
       <td style="text-align:right;font-weight:600;${p.anomaly?'color:var(--red)':''}">${p.realLh?p.realLh.toFixed(1)+" L/h":"—"}${p.anomaly?' ⚠️':''}${p.driftLh!=null?`<div style="font-size:10px;font-weight:400;color:${p.driftLh>20?'var(--red)':p.driftLh>0?'var(--amber)':'var(--green)'}">vs attendu ${p.driftLh>0?'+':''}${p.driftLh.toFixed(0)}%</div>`:""}</td>
       <td style="text-align:right">${p.rendement?p.rendement.toFixed(2)+" kWh/L":"—"}</td>
       <td style="text-align:right">${p.costPerKwh?fmtD(p.costPerKwh):"—"}${p.vsJirama!=null?`<div style="font-size:10px;color:${p.vsJirama>0?'var(--red)':'var(--green)'}">${p.vsJirama>0?'+':''}${fmtD(p.vsJirama)} vs JIRAMA</div>`:""}${p.lowLoad?`<div style="font-size:10px;color:var(--amber)">charge ${p.chargePct.toFixed(0)}% ⚠️</div>`:""}</td>
-      <td><div class="rowact"><button class="iconbtn" title="Relevés" onclick="openA1GenLogList('${p.g.id}')">📄</button><button class="iconbtn" onclick="openA1Genset('${p.g.id}')">✎</button><button class="iconbtn del" onclick="deleteA1Genset('${p.g.id}')">🗑</button></div></td>
+      <td><div class="rowact"><button class="iconbtn" title="Diagnostic" onclick="openA1Diag('gen','${p.g.id}')">🔬</button><button class="iconbtn" title="Relevés" onclick="openA1GenLogList('${p.g.id}')">📄</button><button class="iconbtn" onclick="openA1Genset('${p.g.id}')">✎</button><button class="iconbtn del" onclick="deleteA1Genset('${p.g.id}')">🗑</button></div></td>
     </tr>`).join("");
   document.getElementById("scr-a1genset").innerHTML=`
     <button class="backlink" onclick="setScreen('audit')">← Retour aux audits</button>
     <div class="pagetitle"><div><h1>🔌 A1 — Groupes électrogènes / JIRAMA</h1><div class="sub">Rendement, coût du kWh vs réseau, dérives & anomalies — prestation d'optimisation énergétique</div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="cta ghost" onclick="openFuelPrices()">⛽ Prix carburant</button>
         <button class="cta ghost" onclick="openA1GenImport()">⇊ Importer CSV</button>
         <button class="cta ghost" onclick="openA1Genset()">+ Groupe</button>
         <button class="cta ghost" onclick="openA1GenLog()">+ Relevé</button>
@@ -5810,6 +6043,7 @@ function renderA1Genset(){
     </div>
     ${totals.jiramaKwh>0?`<div class="card" style="border-left:3px solid var(--navy)"><b>⚡ Comparatif réseau JIRAMA :</b> ${Math.round(totals.kwh).toLocaleString('fr-FR')} kWh produits au groupe = <b>${fmtD(totals.cost)}</b> ; au tarif réseau (${fmtD(totals.jiramaKwh)}/kWh) cela coûterait <b>${fmtD(totals.jiramaEquiv)}</b> → ${totals.cost>totals.jiramaEquiv?`surcoût d'autonomie de <b style="color:var(--amber)">${fmtD(totals.cost-totals.jiramaEquiv)}</b> (prix de la continuité pendant les délestages)`:`<b style="color:var(--green)">économie de ${fmtD(totals.jiramaEquiv-totals.cost)}</b> vs réseau`}.</div>`:""}
     ${anomalies.length||lowLoads.length?`<div class="card" style="border-left:3px solid var(--red)">${anomalies.length?`<b>⚠️ Surconsommations :</b> ${anomalies.map(p=>esc(p.g.name)+" ("+p.realLh.toFixed(1)+" L/h, +"+p.driftLh.toFixed(0)+"% vs attendu)").join(" · ")}. À vérifier : entretien, injecteurs, charge, ou détournement de carburant.`:""}${anomalies.length&&lowLoads.length?"<br>":""}${lowLoads.length?`<b style="color:var(--amber)">Sous-charge :</b> ${lowLoads.map(p=>esc(p.g.name)+" ("+p.chargePct.toFixed(0)+"%)").join(" · ")} — groupe surdimensionné, rendement et durée de vie dégradés.`:""}</div>`:""}
+    ${(function(){const tl=arr.reduce((s,p)=>s+((p.diag&&p.diag.loss)||0),0);const fr=arr.filter(p=>p.diag&&p.diag.fraudScore>=35);return (tl>0||fr.length)?`<div class="card" style="border-left:3px solid var(--navy)">${tl>0?`<b>💸 Impact financier estimé (surconsommation) :</b> ${fmtD(tl)}. `:""}${fr.length?`<b style="color:var(--red)">🚨 ${fr.length} groupe(s) à risque de détournement</b> (score ≥ 35) — ouvrez le 🔬 diagnostic.`:""}${tl<=0&&!DB.meta.fuelPrices.gasoil?` <span style="color:var(--muted)">Renseignez les <b>⛽ prix carburant</b> pour chiffrer l'impact.</span>`:""}</div>`:"";})()}
     <div class="card"><h2>Parc de groupes (${DB.a1gensets.length} groupes · ${DB.a1genlogs.length} relevés)</h2>
       ${arr.length?`<div style="overflow-x:auto"><table><thead><tr><th>Groupe</th><th style="text-align:right">Heures</th><th style="text-align:right">kWh</th><th style="text-align:right">Conso</th><th style="text-align:right">Rendement</th><th style="text-align:right">Coût/kWh</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`:`<div class="empty">Aucun groupe. Cliquez « + Groupe » ou « ⇊ Importer CSV ».</div>`}
     </div>`;
@@ -5854,14 +6088,17 @@ function openA1GenLog(id, gensetId){
       <input type="number" step="0.1" id="gl-hours" value="${l.hours!=null?l.hours:''}" placeholder="heures"><input type="number" step="0.1" id="gl-liters" value="${l.liters!=null?l.liters:''}" placeholder="litres"></div>
     <div class="field row2"><label>Énergie produite (kWh) & charge moyenne (%)</label>
       <input type="number" step="0.1" id="gl-kwh" value="${l.kwh!=null?l.kwh:''}" placeholder="kWh (si compteur)"><input type="number" id="gl-charge" value="${l.chargePct!=null?l.chargePct:''}" placeholder="% de charge"></div>
-    <div class="field row2"><label>Coût carburant & devise</label>
-      <input type="number" id="gl-cost" value="${l.cost!=null?l.cost:''}"><select id="gl-cur">${curOptions(l.currency)}</select></div>
+    <div class="field row2"><label>Coût carburant total (option) & prix/litre spécifique (option)</label>
+      <input type="number" id="gl-cost" value="${l.cost!=null?l.cost:''}" placeholder="coût total"><input type="number" step="0.01" id="gl-unit" value="${l.unitPrice!=null?l.unitPrice:''}" placeholder="prix/L (sinon table ⛽)"></div>
     <div class="field"><label>Tarif réseau JIRAMA (par kWh, pour comparaison — facultatif)</label><input type="number" step="0.01" id="gl-jirama" value="${l.jiramaPrice!=null?l.jiramaPrice:''}" placeholder="prix du kWh JIRAMA"></div>
+    <div class="field"><label>Traçabilité (option) & devise</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><input id="gl-site" value="${esc(l.site||'')}" placeholder="Site" style="flex:1;min-width:90px;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px"><input id="gl-operator" value="${esc(l.operator||'')}" placeholder="Opérateur" style="flex:1;min-width:100px;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px"><input id="gl-station" value="${esc(l.station||'')}" placeholder="Fournisseur/station" style="flex:1;min-width:120px;padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px"><select id="gl-cur" style="padding:9px 10px;border:1px solid var(--line);border-radius:6px;font-size:13px">${curOptions(l.currency)}</select></div></div>
     <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="saveA1GenLog('${id||''}')">Enregistrer</button></div>`);
 }
 function saveA1GenLog(id){
   const obj={ gensetId:val("gl-gen"), date:val("gl-date")||todayISO(), hours:parseFloat(val("gl-hours"))||0, liters:parseFloat(val("gl-liters"))||0,
-    kwh:parseFloat(val("gl-kwh"))||0, chargePct:parseFloat(val("gl-charge"))||0, cost:parseFloat(val("gl-cost"))||0, currency:val("gl-cur"), jiramaPrice:parseFloat(val("gl-jirama"))||0 };
+    kwh:parseFloat(val("gl-kwh"))||0, chargePct:parseFloat(val("gl-charge"))||0, cost:parseFloat(val("gl-cost"))||0, unitPrice:parseFloat(val("gl-unit"))||0, currency:val("gl-cur"), jiramaPrice:parseFloat(val("gl-jirama"))||0,
+    site:(val("gl-site")||"").trim(), operator:(val("gl-operator")||"").trim(), station:(val("gl-station")||"").trim() };
   if(!obj.gensetId){ toast("Sélectionnez un groupe."); return; }
   if(id){ Object.assign(DB.a1genlogs.find(x=>x.id===id),obj); } else { obj.id=uid(); DB.a1genlogs.push(obj); }
   save(); closeModal(); renderA1Genset(); toast("Relevé enregistré.");
@@ -5968,7 +6205,7 @@ function runA1GenImport(){
 function buildGensetContext(){
   const {arr, totals}=a1GenCompute(a1genClient);
   let t=`Analyse de groupes électrogènes (méthode BSM, Madagascar — contexte délestages JIRAMA). Devise ${DB.meta.defaultCurrency}. Total ${Math.round(totals.hours)} h, ${Math.round(totals.liters)} L, ${Math.round(totals.kwh)} kWh, coût carburant ${fmtD(totals.cost)}. Rendement moyen ${totals.rendement?totals.rendement.toFixed(2):"?"} kWh/L, coût ${fmtD(totals.costPerKwh)}/kWh${totals.jiramaKwh?`, tarif réseau JIRAMA ${fmtD(totals.jiramaKwh)}/kWh (équivalent réseau ${fmtD(totals.jiramaEquiv)})`:""}.\nGroupes :\n`;
-  arr.forEach(p=>{ t+=`- ${p.g.name} (${[p.g.puissanceKva?p.g.puissanceKva+" kVA":"",p.g.carburant,p.age!=null?p.age+" ans":""].filter(Boolean).join(", ")||"?"}) : ${Math.round(p.hours)} h, ${Math.round(p.liters)} L, ${Math.round(p.kwh)} kWh, conso réelle ${p.realLh?p.realLh.toFixed(1):"?"} L/h${p.expLiters>0?` (conso attendue ${Math.round(p.expLiters)} L selon tableau de bord → dérive ${p.driftLh!=null?(p.driftLh>0?"+":"")+p.driftLh.toFixed(0)+"%":"?"}${p.gap?", écart valorisé "+fmtD(p.gap):""})`:(p.consoTheo?` (constructeur ${p.consoTheo} L/h à pleine charge ; attendu ${p.expectedLh.toFixed(1)} à ${p.chargePct?p.chargePct.toFixed(0)+"% de charge":"charge inconnue"} → dérive ${p.driftLh!=null?(p.driftLh>0?"+":"")+p.driftLh.toFixed(0)+"%":"?"})`:"")}, rendement ${p.rendement?p.rendement.toFixed(2):"?"} kWh/L, ${fmtD(p.costPerKwh)}/kWh${p.vsJirama!=null?` (${p.vsJirama>0?"+":""}${fmtD(p.vsJirama)}/kWh vs réseau)`:""}${p.anomaly?" [SURCONSOMMATION]":""}${p.lowLoad?" [SOUS-CHARGE]":""}.\n`; });
+  arr.forEach(p=>{ t+=`- ${p.g.name} (${[p.g.puissanceKva?p.g.puissanceKva+" kVA":"",p.g.carburant,p.age!=null?p.age+" ans":""].filter(Boolean).join(", ")||"?"}) : ${Math.round(p.hours)} h, ${Math.round(p.liters)} L, ${Math.round(p.kwh)} kWh, conso réelle ${p.realLh?p.realLh.toFixed(1):"?"} L/h${p.expLiters>0?` (conso attendue ${Math.round(p.expLiters)} L selon tableau de bord → dérive ${p.driftLh!=null?(p.driftLh>0?"+":"")+p.driftLh.toFixed(0)+"%":"?"}${p.gap?", écart valorisé "+fmtD(p.gap):""})`:(p.consoTheo?` (constructeur ${p.consoTheo} L/h à pleine charge ; attendu ${p.expectedLh.toFixed(1)} à ${p.chargePct?p.chargePct.toFixed(0)+"% de charge":"charge inconnue"} → dérive ${p.driftLh!=null?(p.driftLh>0?"+":"")+p.driftLh.toFixed(0)+"%":"?"})`:"")}, rendement ${p.rendement?p.rendement.toFixed(2):"?"} kWh/L, ${fmtD(p.costPerKwh)}/kWh${p.vsJirama!=null?` (${p.vsJirama>0?"+":""}${fmtD(p.vsJirama)}/kWh vs réseau)`:""}${p.anomaly?" [SURCONSOMMATION]":""}${p.lowLoad?" [SOUS-CHARGE]":""}${p.diag?" | DIAGNOSTIC BSM: "+((A1_CAUSES[p.diag.top.key]||{}).label||"")+" (score "+p.diag.top.score+", tendance "+p.diag.trend+")"+(p.diag.fraudScore>=35?", RISQUE DÉTOURNEMENT "+p.diag.fraudScore+"/100":"")+(p.diag.loss>0?", impact ~"+fmtD(p.diag.loss):"")+(p.diag.flags.length?" [signaux: "+p.diag.flags.map(f=>f.txt).join(" ; ")+"]":""):""}${p.g.verdict?" | CONCLUSION AUDITEUR: "+((A1_CAUSES[p.g.verdict.cause]||{}).label||"à investiguer")+" ("+(p.g.verdict.status||"")+")"+(p.g.verdict.note?" - "+p.g.verdict.note:""):""}.\n`; });
   t+="\nIdentifie : surconsommations (entretien, injecteurs, filtres, ou détournement de carburant), groupes en sous-charge (surdimensionnés → rendement et durée de vie dégradés), rendement anormalement bas, et l'arbitrage coût groupe vs réseau JIRAMA. Donne des recommandations concrètes, chiffrées et hiérarchisées, en tenant compte des délestages.";
   return t.slice(0,6500);
 }
@@ -5990,6 +6227,7 @@ function printA1GenReport(){
     <p class="meta">Total : ${Math.round(totals.hours)} h · ${Math.round(totals.liters)} L · ${Math.round(totals.kwh)} kWh · coût ${fmtD(totals.cost)} · rendement ${totals.rendement.toFixed(2)} kWh/L · coût ${fmtD(totals.costPerKwh)}/kWh.${totals.jiramaKwh>0?` Équivalent réseau JIRAMA : ${fmtD(totals.jiramaEquiv)} (${totals.cost>totals.jiramaEquiv?"surcoût d'autonomie "+fmtD(totals.cost-totals.jiramaEquiv):"économie "+fmtD(totals.jiramaEquiv-totals.cost)}).`:""}</p>
     ${anomalies.length?`<p class="meta"><b>Surconsommations :</b> ${anomalies.map(p=>esc(p.g.name)+" (+"+p.driftLh.toFixed(0)+"%)").join(", ")}.</p>`:""}
     <table><tr><th>Groupe</th><th style="text-align:right">Heures</th><th style="text-align:right">kWh</th><th style="text-align:right">L/h</th><th style="text-align:right">kWh/L</th><th style="text-align:right">Coût/kWh</th></tr>${body}</table>
+    ${a1DiagReportSection(arr,"gen")}
     <p class="meta">Édité le ${frDate(todayISO())} — ${DB.meta.cabinetName||"BSM Advisory & Consulting"}.</p>
   </div>`;
   window.print();
