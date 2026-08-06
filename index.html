@@ -469,16 +469,19 @@ const MG_CATEGORIES = ["M1 — Manœuvre","M2 — Manœuvre spécialisé","OS1 �
 const CONTRACT_KINDS = ["Audit ponctuel","Accompagnement annuel","Forfait mission","Diagnostic R5","Veille / Abonnement","Autre"];
 const LEAVE_TYPES = ["Congé payé","Maladie","Sans solde","Récupération","Mission terrain","Formation"];
 const AUDIT_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSd7P7NzygqF1RizjTcYJvaFCbRUV71-XAdPe7Ly0Kth08vi4A/viewform";
-// Catalogue des audits terrain (chacun son Google Form ; URL configurable par la direction)
-const AUDIT_TYPES=[
-  {key:"initial",     icon:"📋", label:"Audit initial R5",        desc:"Diagnostic global — alimente la matrice R5 (scores, cartographie, recommandations)."},
-  {key:"securite",    icon:"🛡️", label:"Audit sécurité",          desc:"Sûreté, contrôle d'accès, protection des biens et des personnes."},
-  {key:"incendie",    icon:"🔥", label:"Audit incendie / sécurité incendie", desc:"Prévention incendie, extincteurs, évacuation, conformité."},
-  {key:"financier",   icon:"💰", label:"Audit financier",         desc:"Trésorerie, contrôle interne, séparation des tâches, risques de fraude."},
-  {key:"operationnel",icon:"⚙️", label:"Audit opérationnel",      desc:"Processus, continuité d'activité, fournisseurs, efficacité."}
+// Audit terrain — OPTION A : UN SEUL Google Form à SECTIONS (une section = un domaine d'audit).
+// Toutes les réponses tombent dans le même onglet REPONSES FORMS → réparties automatiquement dans la matrice R5.
+// Cette liste est purement informative (les sections vivent dans le Google Form) et reste ouverte : ajouter une
+// entrée ici = ajouter une section au form. Les audits SÉPARÉS qui arriveront plus tard vont dans DB.meta.extraForms.
+const AUDIT_SECTIONS=[
+  {icon:"🧭", label:"Gouvernance & stratégie", desc:"Contexte, activités, pilotage, maturité de la gestion des risques (socle R5)."},
+  {icon:"🛡️", label:"Sécurité",               desc:"Sûreté, contrôle d'accès, protection des biens et des personnes."},
+  {icon:"🔥", label:"Incendie",                desc:"Prévention incendie, extincteurs, évacuation, conformité."},
+  {icon:"⚙️", label:"Opérationnel",            desc:"Processus, continuité d'activité, fournisseurs, efficacité."},
+  {icon:"🚚", label:"Logistique",              desc:"Flux, stocks, transport, chaîne d'approvisionnement, fournisseurs critiques."}
 ];
-function auditTypeDef(k){ return AUDIT_TYPES.find(a=>a.key===k)||AUDIT_TYPES[0]; }
-function auditUrl(k){ const m=(DB.meta.auditForms||{}); return m[k]||(k==="initial"?AUDIT_FORM_URL:""); }
+function auditMainUrl(){ return (DB.meta.auditForms&&DB.meta.auditForms.main)||AUDIT_FORM_URL; }
+function extraForms(){ return (DB.meta.extraForms||[]).filter(f=>f&&f.url); }
 function r5Niveau(score){ return score>=15?"CRITIQUE":score>=9?"HAUTE":score>=4?"MOYENNE":"FAIBLE"; }
 function r5Badge(n){ return {CRITIQUE:"b-red",HAUTE:"b-orange",MOYENNE:"b-amber",FAIBLE:"b-green"}[n]||"b-grey"; }
 
@@ -540,7 +543,9 @@ function load(){
   if(!DB.meta.legalMg) DB.meta.legalMg={ dureeHebdo:40, dureeMensuelle:173.33, congesParMois:2.5, cnapsSal:1, cnapsPat:13, ostieSal:1, ostiePat:5 };
   if(DB.meta.rateUsdMga==null) DB.meta.rateUsdMga=4500;
   if(!DB.meta.auditForms) DB.meta.auditForms={};
-  if(!DB.meta.auditForms.initial) DB.meta.auditForms.initial=AUDIT_FORM_URL;
+  // Migration option A : un seul formulaire à sections. On récupère l'ancien ".initial" s'il existait.
+  if(!DB.meta.auditForms.main) DB.meta.auditForms.main=DB.meta.auditForms.initial||AUDIT_FORM_URL;
+  if(!DB.meta.extraForms) DB.meta.extraForms=[];
   if(DB.meta.taxRate==null) DB.meta.taxRate=20;
   if(DB.meta.amort==null) DB.meta.amort=0;
   if(DB.meta.financier==null) DB.meta.financier=0;
@@ -5291,23 +5296,29 @@ function saveActivity(id){
 function deleteActivity(id){confirmModal("Supprimer cette activité ?","",()=>{DB.activities=DB.activities.filter(x=>x.id!==id);save();renderRH();toast("Supprimé.");});}
 
 /* ----------------------------- Audit terrain ----------------------------- */
-let auditType="initial";
-function setAuditType(k){ auditType=k; renderAudit(); }
 function renderAudit(){
-  const def=auditTypeDef(auditType), url=auditUrl(auditType);
+  const url=auditMainUrl();
   const embed = url? (url+(url.indexOf("?")>=0?"&":"?")+"embedded=true") : "";
-  const cards=AUDIT_TYPES.map(a=>{ const has=!!auditUrl(a.key); const sel=a.key===auditType;
-    return `<div onclick="setAuditType('${a.key}')" style="cursor:pointer;flex:1;min-width:150px;border:1px solid ${sel?'var(--gold)':'var(--line)'};border-radius:10px;padding:10px 12px;background:${sel?'var(--cream)':'#fff'}">
-      <div style="font-size:18px">${a.icon}</div>
-      <div style="font-weight:700;font-size:13px;margin:2px 0">${a.label}</div>
-      <div style="font-size:11px;color:var(--muted);line-height:1.35">${a.desc}</div>
-      <div style="margin-top:6px">${has?'<span class="badge b-green">Formulaire prêt</span>':'<span class="badge b-orange">À configurer</span>'}</div>
-    </div>`;}).join("");
+  const chips=AUDIT_SECTIONS.map(s=>`<div style="flex:1;min-width:165px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff">
+      <div style="font-size:18px">${s.icon}</div>
+      <div style="font-weight:700;font-size:13px;margin:2px 0">${s.label}</div>
+      <div style="font-size:11px;color:var(--muted);line-height:1.35">${s.desc}</div>
+    </div>`).join("");
+  const extras=extraForms();
+  const extraCards=extras.length?`<div class="card" style="margin-bottom:12px">
+      <h2 style="margin:0 0 6px">🗂️ Autres formulaires</h2>
+      <div class="msub" style="margin:-2px 0 8px">Audits séparés (ne remplissent pas encore la matrice automatiquement — s'ouvrent d'ici).</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">${extras.map(f=>`<a href="${f.url}" target="_blank" rel="noopener"><button class="cta ghost">${esc(f.label||"Formulaire")} ↗</button></a>`).join("")}</div>
+    </div>`:"";
   document.getElementById("scr-audit").innerHTML=`
-    <div class="pagetitle"><div><h1>Audit terrain</h1><div class="sub">Plusieurs audits par Google Forms — les réponses alimentent la matrice R5</div></div>
+    <div class="pagetitle"><div><h1>Audit terrain</h1><div class="sub">Un seul formulaire d'audit à sections — les réponses alimentent la matrice R5</div></div>
       <div style="display:flex;gap:8px">${isDirection()?`<button class="cta" onclick="syncAuditsFromForms()" title="Tirer les réponses de REPONSES FORMS et les rattacher aux clients/missions">🔄 Synchroniser les audits</button><button class="cta ghost" onclick="openAuditConfig()">⚙ Configurer les formulaires</button>`:""}${url?`<a href="${url}" target="_blank" rel="noopener"><button class="cta gold">Ouvrir ↗</button></a>`:""}</div></div>
     ${isDirection()?`<div class="hint" id="audit-sync-status" style="margin:-4px 0 10px">Cliquez « 🔄 Synchroniser les audits » pour importer automatiquement les nouvelles réponses (via le pont Google) et les rattacher aux clients et missions d'audit.</div>`:""}
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">${cards}</div>
+    <div class="infobox" style="margin-bottom:12px">
+      <b>Audit R5 sectionné.</b> Un formulaire unique couvre tous les domaines ci-dessous. Chaque réponse remplit l'onglet <b>REPONSES FORMS</b> (Google Sheets R5) — scores, cartographie et recommandations — puis le Cockpit répartit tout automatiquement (Clients, Missions, Matrice des risques, Recommandations) via « 🔄 Synchroniser les audits » ou « ⇊ Importer R5 ».
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">${chips}</div>
+    ${extraCards}
     <div class="card" style="border-left:3px solid var(--navy);margin-bottom:12px">
       <div><h2 style="margin:0">🧮 Programmes d'analyse A1</h2><div class="msub" style="margin:2px 0 6px">Analyse de données opérationnelles à valeur ajoutée — prestation vendable au client (calcul + IA + conseils + rapport).</div></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -5315,14 +5326,11 @@ function renderAudit(){
         <button class="cta ghost" disabled title="Prochain module">🔌 Groupes électrogènes / JIRAMA — bientôt</button>
       </div>
     </div>
-    <div class="infobox">
-      <b>${def.icon} ${def.label}.</b> Les réponses arrivent dans ta feuille <b>REPONSES FORMS</b> (Google Sheets R5), qui calcule scores, cartographie et recommandations. Le Cockpit <b>importe</b> ensuite ces données (bouton « ⇊ Importer R5 » en haut) pour piloter la suite ici.
-    </div>
     ${url? `<div class="card">
-      <iframe class="formframe" src="${embed}" title="${esc(def.label)}">Chargement…</iframe>
+      <iframe class="formframe" src="${embed}" title="Audit R5">Chargement…</iframe>
       <div class="hint" style="margin-top:8px">Si le formulaire ne s'affiche pas ici (selon le navigateur), utilise le bouton « Ouvrir ↗ ».</div>
     </div>`
-    : `<div class="card"><div class="empty">Aucun formulaire Google configuré pour « ${esc(def.label)} ».${isDirection()?` Cliquez « ⚙ Configurer les formulaires » et collez le lien du Google Form.`:` Demandez à la direction de le configurer.`}</div></div>`}`;
+    : `<div class="card"><div class="empty">Aucun formulaire d'audit configuré.${isDirection()?` Cliquez « ⚙ Configurer les formulaires » et collez le lien de votre Google Form à sections.`:` Demandez à la direction de le configurer.`}</div></div>`}`;
 }
 // Sync « à la demande » : tire l'onglet REPONSES FORMS via le pont Google et rattache aux clients/missions d'audit.
 async function syncAuditsFromForms(){
@@ -5341,17 +5349,29 @@ async function syncAuditsFromForms(){
 }
 function openAuditConfig(){
   if(!isDirection()){ toast("Réservé à la direction."); return; }
+  const extras=(DB.meta.extraForms||[]);
   openModal(`
     <span class="close" onclick="closeModal()">✕</span>
     <h2>Configurer les formulaires d'audit</h2>
-    <div class="msub">Collez le lien de partage de chaque Google Form. Créez un formulaire par type d'audit dans votre Google Drive, puis copiez son URL (bouton « Envoyer » → lien).</div>
-    ${AUDIT_TYPES.map(a=>`<div class="field"><label>${a.icon} ${a.label}</label><input id="af-${a.key}" value="${esc(auditUrl(a.key))}" placeholder="https://docs.google.com/forms/d/e/.../viewform"></div>`).join("")}
-    <div class="hint">Astuce : dans Google Forms, chaque formulaire peut envoyer ses réponses vers le même Google Sheet (onglet REPONSES FORMS) ou vers des onglets séparés selon votre organisation.</div>
+    <div class="msub">Option A : <b>un seul formulaire Google à sections</b> (Gouvernance, Sécurité, Incendie, Opérationnel, Logistique…). Toutes les réponses tombent dans le même onglet <b>REPONSES FORMS</b> et sont réparties automatiquement dans la matrice R5.</div>
+    <div class="field"><label>🎯 Formulaire d'audit principal (à sections)</label><input id="af-main" value="${esc(auditMainUrl())}" placeholder="https://docs.google.com/forms/d/e/.../viewform"></div>
+    <h2 style="font-size:15px;margin:14px 0 4px">Autres formulaires <span style="font-weight:400;color:var(--muted);font-size:12px">(optionnel — pour plus tard)</span></h2>
+    <div class="msub">Pour des audits séparés qui arriveront plus tard. Ils s'ouvrent depuis l'onglet mais n'alimentent pas encore la matrice tant qu'on ne les branche pas.</div>
+    <div id="extra-forms">${extras.map((f,i)=>extraFormRow(i,f)).join("")}</div>
+    <button type="button" class="cta ghost sm" onclick="addExtraFormRow()">+ Ajouter un formulaire</button>
     <div class="modal-actions"><button class="cta ghost" onclick="closeModal()">Annuler</button><button class="cta" onclick="saveAuditConfig()">Enregistrer</button></div>`);
 }
+function extraFormRow(i,f){ f=f||{}; return `<div class="ef-row" style="display:flex;gap:8px;margin-bottom:6px">
+    <input class="ef-label" style="flex:0 0 34%" value="${esc(f.label||"")}" placeholder="Nom (ex. Audit énergie)">
+    <input class="ef-url" style="flex:1" value="${esc(f.url||"")}" placeholder="https://docs.google.com/forms/d/e/.../viewform">
+    <button type="button" class="cta ghost sm" onclick="this.parentNode.remove()" title="Retirer cette ligne">✕</button>
+  </div>`; }
+function addExtraFormRow(){ const box=document.getElementById("extra-forms"); if(box) box.insertAdjacentHTML("beforeend", extraFormRow(box.children.length,{})); }
 function saveAuditConfig(){
   DB.meta.auditForms=DB.meta.auditForms||{};
-  AUDIT_TYPES.forEach(a=>{ DB.meta.auditForms[a.key]=(val("af-"+a.key)||"").trim(); });
+  DB.meta.auditForms.main=(val("af-main")||"").trim();
+  const rows=[...document.querySelectorAll("#extra-forms .ef-row")];
+  DB.meta.extraForms=rows.map(r=>({label:(r.querySelector(".ef-label").value||"").trim(), url:(r.querySelector(".ef-url").value||"").trim()})).filter(f=>f.url);
   save(); closeModal(); renderAudit(); toast("Formulaires d'audit enregistrés.");
 }
 
